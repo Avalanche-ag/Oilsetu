@@ -24,6 +24,32 @@ app = FastAPI(
 )
 app.include_router(visual_proof_router)
 
+# ==========================================
+# DYNAMIC TASK REALLOCATION ENDPOINT
+# ==========================================
+
+@app.post("/api/v1/reallocation/suggest", tags=["Dynamic Task Reallocation"])
+def suggest_task_reallocation(activity: ActivityRequest):
+    """
+    Suggest a suitable available worker when one or more workers are absent.
+    Uses the reallocation logic from intelligence/reallocation.py.
+    """
+
+    activity_data = {
+        "activity_description": activity.activity_description,
+        "discipline": activity.discipline,
+        "asset_id": activity.asset_id,
+        "status": activity.status,
+        "percent_complete": activity.percent_complete
+    }
+
+    result = suggest_reallocation(
+        activity=activity_data,
+        absent_workers=activity.absent_workers,
+        available_workers=activity.available_workers
+    )
+
+    return result
 
 @app.on_event("startup")
 def startup_event():

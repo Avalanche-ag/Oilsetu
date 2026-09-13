@@ -1,0 +1,10 @@
+id,name,discipline,workload,availability
+W-CIV-01,Ramesh Yadav,Civil,5,70
+W-CIV-02,Suresh Naik,Civil,2,90
+W-PIP-01,K. Iyer,Piping,8,60
+W-PIP-02,M. Verma,Piping,3,85
+W-PIP-03,A. Dsouza,Piping,3,95
+W-ELE-01,Voltguard Tech A,Electrical,4,75
+W-EQP-01,HeavyLift Rigger A,Static/Rotating Equipment,6,65
+W-INS-01,Sensorix Tech A,Instrumentation,1,90
+W-HSE-01,Site HSE Officer,HSE,2,100
