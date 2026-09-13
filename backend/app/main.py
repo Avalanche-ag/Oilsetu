@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query, status
 from sqlalchemy.orm import Session
@@ -7,6 +8,7 @@ from .database import get_db, create_tables, ScheduleActivity, ExecutionReport
 from .init_db import import_schedule_excel
 from .intelligence.delay import analyze_delay
 from .intelligence.reallocation import suggest_reallocation
+from .intelligence.schedule_loader import load_worker_roster
 from .matching.matcher import find_top_matches
 from .schemas.activity import (
     ActivityRequest,
@@ -32,7 +34,14 @@ app.include_router(visual_proof_router)
 def suggest_task_reallocation(activity: ActivityRequest):
     """
     Suggest a suitable available worker when one or more workers are absent.
-    Uses the reallocation logic from intelligence/reallocation.py.
+
+    The worker roster is loaded automatically from worker_roster.csv.
+    The backend:
+    1. Reads all workers from the roster.
+    2. Removes absent workers.
+    3. Matches workers by discipline.
+    4. Selects the worker with the lowest workload.
+    5. Uses availability as the tie-breaker.
     """
 
     activity_data = {
@@ -43,10 +52,59 @@ def suggest_task_reallocation(activity: ActivityRequest):
         "percent_complete": activity.percent_complete
     }
 
+    # Location of the worker roster CSV
+    backend_dir = Path(__file__).resolve().parents[1]
+    roster_path = (
+        backend_dir
+        / "tests"
+        / "fixtures"
+        / "worker_roster.csv"
+    )
+
+    if not roster_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Worker roster not found at {roster_path}"
+        )
+
+    # Automatically load all workers from the CSV
+    all_workers = load_worker_roster(roster_path)
+
+    # Use the absent worker IDs/names sent by the frontend
+    absent_workers = activity.absent_workers or []
+
+    # Automatically calculate available workers from the roster
+    absent_worker_ids = set()
+
+    for worker in absent_workers:
+        if isinstance(worker, dict):
+            worker_id = worker.get("id") or worker.get("worker_id")
+            worker_name = worker.get("name") or worker.get("worker_name")
+
+            if worker_id:
+                absent_worker_ids.add(worker_id)
+
+            if worker_name:
+                absent_worker_ids.add(worker_name)
+        else:
+            absent_worker_ids.add(worker)
+
+    available_workers = []
+
+    for worker in all_workers:
+        worker_id = worker.get("id") or worker.get("worker_id")
+        worker_name = worker.get("name") or worker.get("worker_name")
+
+        if (
+            worker_id not in absent_worker_ids
+            and worker_name not in absent_worker_ids
+        ):
+            available_workers.append(worker)
+
     result = suggest_reallocation(
         activity=activity_data,
-        absent_workers=activity.absent_workers,
-        available_workers=activity.available_workers
+        absent_workers=absent_workers,
+        available_workers=available_workers
     )
 
     return result
