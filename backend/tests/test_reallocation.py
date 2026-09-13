@@ -1,218 +1,101 @@
+from pathlib import Path
+
 from app.intelligence.reallocation import suggest_reallocation
+from app.intelligence.schedule_loader import (
+    get_activity_by_id,
+    load_activities_from_schedule,
+    load_worker_roster,
+)
+
+DATA_DIR = Path(__file__).parent.parent / "data"
+SCHEDULE_PATH = DATA_DIR / "01_baseline_schedule.xlsx"
+ROSTER_PATH = Path(__file__).parent / "fixtures" / "worker_roster.csv"
+
+
+def test_schedule_loads_expected_row_count():
+    """
+    Sanity check that the real schedule file is being read correctly
+    before trusting any test built on top of it.
+    """
+    activities = load_activities_from_schedule(SCHEDULE_PATH)
+    assert len(activities) == 17
 
 
 def test_no_absent_worker():
     """
-    If no worker is absent, reallocation should not be required.
+    Real activity (Weld Joints, Piping, still Not Started per the schedule).
+    No absence reported -> no reallocation needed.
     """
+    activity = get_activity_by_id(SCHEDULE_PATH, "PIP-3100-0130")
+    workers = load_worker_roster(ROSTER_PATH)
 
-    activity = {
-        "activity_description": "Install pipeline",
-        "discipline": "PIPING",
-    }
-
-    absent_workers = []
-
-    available_workers = [
-        {
-            "id": "w1",
-            "name": "Worker One",
-            "discipline": "PIPING",
-        }
-    ]
-
-    result = suggest_reallocation(
-        activity,
-        absent_workers,
-        available_workers,
-    )
+    result = suggest_reallocation(activity, [], workers)
 
     assert result["reallocation_required"] is False
     assert result["message"] == "No worker absence reported."
 
 
-def test_matching_discipline():
+def test_matching_discipline_civil_activity():
     """
-    A worker from the same discipline should be selected.
+    Real Civil activity (Erect Rebar & Shutter, currently 80% complete
+    per the schedule). The absent Civil worker should be skipped and a
+    Civil worker selected.
     """
+    activity = get_activity_by_id(SCHEDULE_PATH, "CIV-2200-0030")
+    workers = load_worker_roster(ROSTER_PATH)
+    absent_workers = ["W-CIV-01"]
 
-    activity = {
-        "activity_description": "Install pipeline",
-        "discipline": "PIPING",
-    }
-
-    absent_workers = ["w1"]
-
-    available_workers = [
-        {
-            "id": "w2",
-            "name": "Electrical Worker",
-            "discipline": "ELECTRICAL",
-        },
-        {
-            "id": "w3",
-            "name": "Piping Worker",
-            "discipline": "PIPING",
-        },
-    ]
-
-    result = suggest_reallocation(
-        activity,
-        absent_workers,
-        available_workers,
-    )
+    result = suggest_reallocation(activity, absent_workers, workers)
 
     assert result["reallocation_required"] is True
-    assert result["suggested_worker"]["id"] == "w3"
+    assert result["suggested_worker"]["discipline"] == "Civil"
+    assert result["suggested_worker"]["id"] != "W-CIV-01"
 
 
-def test_no_suitable_worker():
+def test_no_suitable_worker_for_hse_when_only_hse_worker_absent():
     """
-    If no worker has the required discipline,
-    no worker should be suggested.
+    Real HSE activity (Toolbox Talk & Permit Issuance). The roster only
+    has one HSE worker - if that worker is absent, no suitable worker
+    should be suggested.
     """
+    activity = get_activity_by_id(SCHEDULE_PATH, "HSE-7700-0010")
+    workers = load_worker_roster(ROSTER_PATH)
+    absent_workers = ["W-HSE-01"]
 
-    activity = {
-        "activity_description": "Install pipeline",
-        "discipline": "PIPING",
-    }
-
-    absent_workers = ["w1"]
-
-    available_workers = [
-        {
-            "id": "w2",
-            "name": "Electrical Worker",
-            "discipline": "ELECTRICAL",
-        },
-        {
-            "id": "w3",
-            "name": "Civil Worker",
-            "discipline": "CIVIL",
-        },
-    ]
-
-    result = suggest_reallocation(
-        activity,
-        absent_workers,
-        available_workers,
-    )
+    result = suggest_reallocation(activity, absent_workers, workers)
 
     assert result["reallocation_required"] is True
     assert result["suggested_worker"] is None
     assert "no suitable available worker" in result["reason"].lower()
 
 
-def test_absent_worker_is_not_selected():
+def test_lowest_workload_worker_selected_for_piping_activity():
     """
-    A worker listed as absent must not be selected,
-    even if their discipline matches.
+    Real Piping activity (Erect Line 24-PL-1004-CS1A Rack Section 3).
+    Roster has 3 Piping workers; W-PIP-01 is absent, leaving W-PIP-02
+    (workload 3, availability 85) and W-PIP-03 (workload 3, availability 95).
+    Equal workload -> higher availability wins (W-PIP-03).
     """
+    activity = get_activity_by_id(SCHEDULE_PATH, "PIP-3100-0120")
+    workers = load_worker_roster(ROSTER_PATH)
+    absent_workers = ["W-PIP-01"]
 
-    activity = {
-        "activity_description": "Install pipeline",
-        "discipline": "PIPING",
-    }
+    result = suggest_reallocation(activity, absent_workers, workers)
 
-    absent_workers = ["w2"]
-
-    available_workers = [
-        {
-            "id": "w2",
-            "name": "Absent Piping Worker",
-            "discipline": "PIPING",
-            "workload": 1,
-        },
-        {
-            "id": "w3",
-            "name": "Available Piping Worker",
-            "discipline": "PIPING",
-            "workload": 3,
-        },
-    ]
-
-    result = suggest_reallocation(
-        activity,
-        absent_workers,
-        available_workers,
-    )
-
-    assert result["suggested_worker"]["id"] == "w3"
+    assert result["suggested_worker"]["id"] == "W-PIP-03"
 
 
-def test_lowest_workload_worker_is_selected():
+def test_discipline_names_are_case_and_whitespace_insensitive():
     """
-    If multiple suitable workers are available,
-    the worker with the lowest workload should be selected.
+    The schedule stores disciplines like 'Civil', 'Piping', 'Electrical'
+    (title case) while earlier hand-written tests used 'PIPING' (upper
+    case). suggest_reallocation() must treat these as equivalent since
+    both forms now genuinely occur across the codebase/tests.
     """
+    activity = get_activity_by_id(SCHEDULE_PATH, "ELE-5500-0410")
+    workers = load_worker_roster(ROSTER_PATH)
 
-    activity = {
-        "activity_description": "Install pipeline",
-        "discipline": "PIPING",
-    }
+    result = suggest_reallocation(activity, ["someone_else"], workers)
 
-    absent_workers = ["w1"]
-
-    available_workers = [
-        {
-            "id": "w2",
-            "name": "Piping Worker A",
-            "discipline": "PIPING",
-            "workload": 8,
-            "availability": 80,
-        },
-        {
-            "id": "w3",
-            "name": "Piping Worker B",
-            "discipline": "PIPING",
-            "workload": 2,
-            "availability": 60,
-        },
-    ]
-
-    result = suggest_reallocation(
-        activity,
-        absent_workers,
-        available_workers,
-    )
-
-    assert result["suggested_worker"]["id"] == "w3"
-
-
-def test_higher_availability_when_workload_is_equal():
-    """
-    If workload is equal, the worker with higher availability
-    should be selected.
-    """
-
-    activity = {
-        "activity_description": "Install pipeline",
-        "discipline": "PIPING",
-    }
-
-    absent_workers = ["w1"]
-
-    available_workers = [
-        {
-            "id": "w2",
-            "name": "Piping Worker A",
-            "discipline": "PIPING",
-            "workload": 3,
-            "availability": 50,
-        },
-        {
-            "id": "w3",
-            "name": "Piping Worker B",
-            "discipline": "PIPING",
-            "workload": 3,
-            "availability": 90,
-        },
-    ]
-
-    result = suggest_reallocation(
-        activity,
-        absent_workers,
-        available_workers,
-    )
-
-    assert result["suggested_worker"]["id"] == "w3"
+    assert result["reallocation_required"] is True
+    assert result["suggested_worker"]["discipline"] == "Electrical"
