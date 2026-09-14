@@ -1,36 +1,28 @@
+from pathlib import Path
+
 from .visual_verifier import verify_photo
 
 
-def run_visual_verification(activity_description, image_path):
-    """
-    Runs AI-based visual verification for a construction-site image.
-    """
+if __name__ == "__main__":
+
+    print("AI Visual Verification Test")
+    print("===========================\n")
+
+    image = input("Enter image path: ").strip()
+    activity = input("Enter the task to compare the image with: ").strip()
+
+    image_path = Path(image)
+
+    if not image_path.exists():
+        print("\nERROR: Image file not found.")
+        print("Checked path:", image_path)
+        raise SystemExit(1)
 
     result = verify_photo(
-        activity_description=activity_description,
-        image_path=image_path
-    )
-
-    return {
-        "photo_verified": result["photo_verified"],
-        "visual_match_confidence": result["visual_match_confidence"],
-        "reason": result["reason"]
-    }
-
-
-if __name__ == "__main__":
-    activity = "Erect Shuttering - Elevated Slab or Beam"
-
-    image = (
-        r"data\visual_verification\images\shuttering"
-        r"\shuttering_01.jpeg"
-    )
-
-    verification_result = run_visual_verification(
-        activity_description=activity,
-        image_path=image
+        activity,
+        str(image_path)
     )
 
     print("\nVISUAL VERIFICATION RESULT")
     print("==========================")
-    print(verification_result)
+    print(result)

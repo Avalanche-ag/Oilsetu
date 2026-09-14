@@ -1,17 +1,17 @@
 import os
 import base64
+
 from dotenv import load_dotenv
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
 
 load_dotenv()
+
 client = OpenAI(
     api_key=os.environ["GEMINI_API_KEY"],
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
-
-# --- Define Pydantic Schema ---
-from pydantic import BaseModel, Field
 
 
 class VisualVerification(BaseModel):
@@ -24,34 +24,52 @@ class VisualVerification(BaseModel):
 
 
 VISUAL_VERIFICATION_PROMPT = """
-You are a construction-site visual verification assistant.
+You are a STRICT construction activity verification classifier.
 
-Your task is to check whether a construction site photo visually supports
-the reported activity.
+Compare the image ONLY with this reported activity:
 
 Reported activity:
 {activity_description}
 
 Rules:
-1. photo_verified must be true only when the image provides reasonable
-   visual evidence that the reported construction activity is being performed.
-2. visual_match_confidence must be a number between 0 and 1.
-3. Do not assume that an activity happened if there is no visible evidence.
-4. If the image is unclear, unrelated, or does not provide enough evidence,
-   set photo_verified to false and use a lower confidence.
-5. Do not use GPS or timestamp information. Those are verified separately
-   by the backend.
-6. Do not invent details that cannot be seen in the image.
+- Do not mark true merely because the image is a construction-site image.
+- The image must visibly show the specific reported activity.
+- If the image shows a different activity, return false.
+- Do not infer hidden work.
+- Do not assume that an activity happened.
+- Scaffolding, workers, tools, rebar, or general construction surroundings
+  alone are not sufficient evidence.
+- Be conservative when the activity is unclear.
+
+Examples:
+- Shuttering/formwork image + "Erect Shuttering" = true
+- Shuttering/formwork image + "Weld Joints" = false
+- Shuttering/formwork image + "Backfill & Compaction" = false
+- Shuttering/formwork image + "Erect Rebar" = false unless rebar installation
+  is clearly the main visible activity
+- Welding visibly taking place + "Weld Joints" = true
+
+Return:
+- photo_verified: true only if the specific activity is visibly supported
+- visual_match_confidence: number between 0 and 1
+- reason: short explanation
+
+Do not use GPS or timestamp information.
+Return only the required structured output.
 """
+
 
 def verify_photo(activity_description, image_path):
     """
-    Verify whether a construction photo visually supports
-    the reported activity.
+    Verify whether an image visually matches the reported construction activity.
     """
-    
-    # Dynamically determine mime type
-    mime_type = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
+
+    if image_path.lower().endswith(".png"):
+        mime_type = "image/png"
+    elif image_path.lower().endswith(".webp"):
+        mime_type = "image/webp"
+    else:
+        mime_type = "image/jpeg"
 
     with open(image_path, "rb") as image_file:
         image_bytes = image_file.read()
@@ -76,7 +94,10 @@ def verify_photo(activity_description, image_path):
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:{mime_type};base64,{image_base64}"
+                                "url": (
+                                    f"data:{mime_type};base64,"
+                                    f"{image_base64}"
+                                )
                             }
                         }
                     ]
@@ -87,12 +108,14 @@ def verify_photo(activity_description, image_path):
         )
 
         result = response.choices[0].message.parsed
+
         return result.model_dump()
-        
+
     except Exception as e:
         print(f"Error during visual verification: {e}")
+
         return {
             "photo_verified": False,
             "visual_match_confidence": 0.0,
-            "reason": f"Verification failed: {str(e)}"
+            "reason": f"Verification failed: {e}"
         }
