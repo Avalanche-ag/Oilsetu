@@ -179,6 +179,7 @@
     "dashboardTitle": "My attendance and work",
     "dashboardSubtitle": "View your assigned tasks and attendance history.",
     "dashboardError": "Worker dashboard could not be loaded. Check that the backend is running.",
+    "noProjectAssigned": "You are not assigned to any project yet. Please contact your supervisor.",
     "presentDays": "Present days",
     "absentDays": "Absent days",
     "leaveDays": "Leave days",

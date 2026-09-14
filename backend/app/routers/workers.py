@@ -212,6 +212,12 @@ def update_attendance(body: AttendanceBody, db: Session = Depends(get_db), curre
     return {"attendance": ser_attendance(row), "reallocations": changes}
 
 
+@router.get("/workers/me/projects")
+def worker_projects(db: Session = Depends(get_db), worker_user: User = Depends(require_worker)):
+    rows = db.query(Worker.project_id).filter(Worker.user_id == worker_user.id).all()
+    return {"projectIds": [row[0] for row in rows]}
+
+
 @router.get("/workers/me/dashboard")
 def worker_dashboard(project_id: str, db: Session = Depends(get_db), worker_user: User = Depends(require_worker)):
     worker = _worker_for_user(db, project_id, worker_user.id)

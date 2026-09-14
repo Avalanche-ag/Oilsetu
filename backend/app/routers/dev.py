@@ -2,15 +2,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ..auth import require_manager
 from ..database import get_db
-from ..models import User
 
 router = APIRouter(prefix="/api/v1", tags=["Dev"])
 
 
+# Local-demo only: no auth by design so the login-page "Reset demo data" link and
+# supervisor menu work without a manager session. Never expose this router publicly.
 @router.post("/dev/reset")
-def reset_demo(db: Session = Depends(get_db), _: User = Depends(require_manager)):
+def reset_demo(db: Session = Depends(get_db)):
     from backend.seed_all import seed_all
 
     for table in (

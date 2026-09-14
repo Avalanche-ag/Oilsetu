@@ -212,6 +212,11 @@ export async function getWorkerDashboard(projectId: string): Promise<WorkerDashb
   return apiFetch(`/workers/me/dashboard?project_id=${encodeURIComponent(projectId)}`)
 }
 
+export async function getWorkerProjects(): Promise<string[]> {
+  const data = await apiFetch<{ projectIds: string[] }>('/workers/me/projects')
+  return data.projectIds
+}
+
 export async function getSupervisorReports(supervisorId: string): Promise<DailyReport[]> {
   return apiFetch(`/reports?supervisor_id=${encodeURIComponent(supervisorId)}`)
 }

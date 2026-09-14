@@ -12,6 +12,8 @@ data/
 raw data/
 *.db
 *.db-journal
+*.md
+!README.md
 
 # Python backend
 __pycache__/

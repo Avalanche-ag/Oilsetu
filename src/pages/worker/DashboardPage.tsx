@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../store/auth'
 import { useUi } from '../../store/ui'
-import { getWorkerDashboard, getProjects, markWorkerAttendance } from '../../services/api'
+import { getWorkerDashboard, getWorkerProjects, markWorkerAttendance } from '../../services/api'
 import { Card, CardBody, Button, Chip, PageHeader } from '../../components/ui'
 import { fmtDate } from '../../utils/dates'
 import { useToast } from '../../store/toast'
@@ -20,8 +20,8 @@ export function WorkerDashboardPage() {
   const [status, setStatus] = useState<WorkerAttendanceStatus>('PTO')
   const [reason, setReason] = useState('')
 
-  const { data: projects = [], isLoading: projectsLoading } = useQuery({ queryKey: ['projects'], queryFn: getProjects })
-  const projectId = projects.some((project) => project.id === activeProjectId) ? activeProjectId || '' : projects[0]?.id || ''
+  const { data: workerProjectIds = [], isLoading: workerProjectsLoading } = useQuery({ queryKey: ['workerProjects', userId], queryFn: getWorkerProjects, enabled: Boolean(userId) })
+  const projectId = workerProjectIds.includes(activeProjectId ?? '') ? (activeProjectId as string) : workerProjectIds[0] ?? ''
   const { data, isLoading, isError } = useQuery({
     queryKey: ['workerDashboard', userId, projectId],
     queryFn: () => getWorkerDashboard(projectId),
@@ -29,8 +29,8 @@ export function WorkerDashboardPage() {
   })
 
   useEffect(() => {
-    if (!activeProjectId && projectId) setActiveProjectId(projectId)
-  }, [activeProjectId, projectId, setActiveProjectId])
+    if (!workerProjectsLoading && projectId && projectId !== activeProjectId) setActiveProjectId(projectId)
+  }, [activeProjectId, projectId, setActiveProjectId, workerProjectsLoading])
 
   const attendanceMutation = useMutation({
     mutationFn: () => markWorkerAttendance({ projectId, date, status, reason: reason || undefined }),
@@ -42,7 +42,8 @@ export function WorkerDashboardPage() {
     onError: () => push(t('worker.attendanceFailed'), 'error'),
   })
 
-  if (projectsLoading || isLoading) return <div className="py-12 text-center text-sm text-slate-500">{t('common.loading')}</div>
+  if (!userId || workerProjectsLoading || isLoading) return <div className="py-12 text-center text-sm text-slate-500">{t('common.loading')}</div>
+  if (!workerProjectsLoading && workerProjectIds.length === 0) return <div className="py-12 text-center text-sm text-slate-500">{t('worker.noProjectAssigned')}</div>
   if (isError || !data) return <div className="py-12 text-center text-sm text-rose-600">{t('worker.dashboardError')}</div>
 
   return (
