@@ -36,7 +36,7 @@ Just pick an account on the login screen — authentication is simulated.
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
+npm run dev        
 npm run typecheck  # strict TS must pass
 npm run build      # production build to dist/
 ```
@@ -45,4 +45,4 @@ npm run build      # production build to dist/
 
 React 18 + TypeScript + Vite · Tailwind CSS · React Router (hash routing for static hosting) ·
 TanStack Query + service layer (`src/services/api.ts`) · Zustand · react-i18next (en/hi) ·
-Recharts · fixtures + localStorage (no backend).
+Recharts · fixtures .
