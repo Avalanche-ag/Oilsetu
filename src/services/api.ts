@@ -4,7 +4,6 @@ import type {
   ScheduleActivity,
   Assignment,
   DailyReport,
-  ReportEntry,
   AiMatchResult,
   ConversationThread,
   Message,
@@ -17,186 +16,208 @@ import type {
   DelayReasonCode,
   DashboardData,
   InsightAggregate,
-  Discipline,
+  Worker,
+  WorkerAttendance,
+  WorkerAttendanceStatus,
+  WorkerDashboardData,
+  WorkerTaskAssignment,
+  ReallocationResult,
 } from '../types/domain'
-import { getDb, persist, resetDb } from '../mocks/db'
+import { getDb } from '../mocks/db'
 import { analyzeReport } from '../mocks/aiEngine'
-import { generateSchedule } from '../mocks/scheduleGenerator'
-import { recomputeRollups } from '../mocks/seed'
 import { uid } from '../utils/ids'
-import { todayIso, parseIso, monthLabel } from '../utils/dates'
 import { APP_CONFIG } from '../config/constants'
 
-const delay = (ms = 200) => new Promise((resolve) => setTimeout(resolve, ms))
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000/api/v1'
+const BACKEND_ANALYZE = (import.meta.env.VITE_USE_BACKEND as string | undefined) !== 'false'
+const TOKEN_KEY = 'oilsetu-token'
 
-interface ActivityUpdateInput {
-  matchedActivityId: string | null
-  status: ActivityStatus | null
-  delayReason?: DelayReasonCode | null
-  delayText?: string
+export function getAuthToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY)
 }
 
-export const aiService = {
-  async processReport(rawText: string, ctx: { projectId: string; supervisorId: string; source: ReportSource; language: string }): Promise<PreviewEntry[]> {
-    await delay(1600 + Math.random() * 600)
-    const db = getDb()
-    const allActivities = db.activities.filter((a) => a.projectId === ctx.projectId)
-    const assignedActivities = allActivities.filter((a) => a.assigneeId === ctx.supervisorId && a.level === 'L6')
-    return analyzeReport(rawText, {
-      projectId: ctx.projectId,
-      supervisorId: ctx.supervisorId,
-      source: ctx.source,
-      assignedActivities,
-      allActivities,
-      language: ctx.language,
-    })
-  },
+export function setAuthToken(token: string | null): void {
+  if (token) localStorage.setItem(TOKEN_KEY, token)
+  else localStorage.removeItem(TOKEN_KEY)
 }
 
-export function getUsers(): Promise<User[]> {
-  return Promise.resolve(getDb().users)
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
+async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = getAuthToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers: { ...headers, ...(init.headers as Record<string, string>) } })
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const body = (await res.json()) as { detail?: string }
+      if (typeof body.detail === 'string') detail = body.detail
+    } catch {
+      detail = ''
+    }
+    throw new ApiError(res.status, detail || `Request failed with status ${res.status}`)
+  }
+  return (await res.json()) as T
+}
+
+const userCache = new Map<string, User>()
+const activityCache = new Map<string, ScheduleActivity[]>()
+
+export async function getUsers(): Promise<User[]> {
+  const users = await apiFetch<User[]>('/users')
+  userCache.clear()
+  users.forEach((u) => userCache.set(u.id, u))
+  return users
 }
 
 export function getUser(id: string): User | undefined {
-  return getDb().users.find((u) => u.id === id)
+  return userCache.get(id)
+}
+
+export async function loginWithPassword(email: string, password: string): Promise<{ token: string; user: User }> {
+  const data = await apiFetch<{ token: string; user: User }>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  })
+  setAuthToken(data.token)
+  userCache.set(data.user.id, data.user)
+  return data
+}
+
+export async function loginAsDemo(userId: string): Promise<{ token: string; user: User }> {
+  const data = await apiFetch<{ token: string; user: User }>('/auth/demo-login', {
+    method: 'POST',
+    body: JSON.stringify({ userId }),
+  })
+  setAuthToken(data.token)
+  userCache.set(data.user.id, data.user)
+  return data
+}
+
+export async function fetchMe(): Promise<User | null> {
+  try {
+    const user = await apiFetch<User>('/auth/me')
+    userCache.set(user.id, user)
+    return user
+  } catch {
+    return null
+  }
 }
 
 export function updateUserLanguage(id: string, lang: 'en' | 'hi'): void {
-  const user = getUser(id)
-  if (user) {
-    user.preferredLanguage = lang
-    persist()
+  apiFetch(`/users/${id}`, { method: 'PATCH', body: JSON.stringify({ preferredLanguage: lang }) }).catch(() => {})
+}
+
+export async function getProjects(): Promise<(Project & { progress: number })[]> {
+  return apiFetch('/projects')
+}
+
+export async function getProject(id: string): Promise<Project | undefined> {
+  try {
+    return await apiFetch(`/projects/${id}`)
+  } catch {
+    return undefined
   }
 }
 
-export function getProjects(): Promise<Project[]> {
-  const db = getDb()
-  const l6 = db.activities.filter((a) => a.level === 'L6')
-  return Promise.resolve(
-    db.projects.map((p) => {
-      const projectL6 = l6.filter((a) => a.projectId === p.id)
-      const completed = projectL6.filter((a) => a.status === 'COMPLETED').length
-      return { ...p, progress: projectL6.length ? Math.round((completed / projectL6.length) * 100) : 0 }
-    })
-  )
+export async function createProject(input: NewProjectInput): Promise<Project> {
+  return apiFetch('/projects', { method: 'POST', body: JSON.stringify(input) })
 }
 
-export function getProject(id: string): Project | undefined {
-  return getDb().projects.find((p) => p.id === id)
-}
-
-export function createProject(input: NewProjectInput): Promise<Project> {
-  const db = getDb()
-  const project: Project = {
-    id: uid('p'),
-    name: input.name,
-    code: input.code,
-    client: input.client,
-    location: input.location,
-    disciplines: input.disciplines,
-    startDate: input.startDate,
-    plannedEnd: input.plannedEnd,
-    status: 'ACTIVE',
-    createdAt: todayIso(),
+export async function uploadSchedule(
+  projectId: string,
+  file: File
+): Promise<{ activityCount: number; levelCounts: Record<string, number>; disciplines: string[] }> {
+  const token = getAuthToken()
+  if (file.size === 0) {
+    return apiFetch(`/projects/${projectId}/schedule/generate`, { method: 'POST' })
   }
-  db.projects.push(project)
-  pushAudit('u-mgr-01', 'PROJECT_CREATED', 'Project', project.id, { project: project.name })
-  persist()
-  return Promise.resolve(project)
+  const form = new FormData()
+  form.append('file', file)
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const res = await fetch(`${API_BASE}/projects/${projectId}/schedule/import`, { method: 'POST', headers, body: form })
+  if (!res.ok) throw new ApiError(res.status, `Schedule import failed with status ${res.status}`)
+  return (await res.json()) as { activityCount: number; levelCounts: Record<string, number>; disciplines: string[] }
 }
 
-export function uploadSchedule(projectId: string, fileName: string): Promise<{ activityCount: number; levelCounts: Record<string, number>; disciplines: string[] }> {
-  const db = getDb()
-  const project = getProject(projectId)
-  if (!project) throw new Error('Project not found')
-  const activities = generateSchedule(project)
-  activities.forEach((a) => db.activities.push(a))
-  project.scheduleFileName = fileName
-  project.scheduleUploadedAt = todayIso()
-  pushAudit('u-mgr-01', 'SCHEDULE_UPLOADED', 'Project', projectId, { file: fileName, count: activities.length })
-  persist()
-  const levelCounts: Record<string, number> = {}
-  activities.forEach((a) => {
-    levelCounts[a.level] = (levelCounts[a.level] || 0) + 1
-  })
-  return Promise.resolve({
-    activityCount: activities.length,
-    levelCounts,
-    disciplines: Array.from(new Set(activities.map((a) => a.discipline).filter((d): d is Discipline => Boolean(d)))),
-  })
-}
-
-export function getActivities(projectId: string): Promise<ScheduleActivity[]> {
-  return Promise.resolve(getDb().activities.filter((a) => a.projectId === projectId))
+export async function getActivities(projectId: string): Promise<ScheduleActivity[]> {
+  const acts = await apiFetch<ScheduleActivity[]>(`/activities?project_id=${encodeURIComponent(projectId)}`)
+  activityCache.set(projectId, acts)
+  return acts
 }
 
 export function getActivity(projectId: string, id: string): ScheduleActivity | undefined {
-  return getDb().activities.find((a) => a.id === id && a.projectId === projectId)
+  return (activityCache.get(projectId) ?? []).find((a) => a.id === id)
 }
 
-export function getAssignments(projectId: string): Promise<Assignment[]> {
-  return Promise.resolve(getDb().assignments.filter((a) => a.projectId === projectId))
+export async function getAssignments(projectId: string): Promise<Assignment[]> {
+  return apiFetch(`/assignments?project_id=${encodeURIComponent(projectId)}`)
 }
 
-export function createAssignment(payload: {
+export async function createAssignment(payload: {
   projectId: string
   workPackageId: string
   supervisorId: string
   includedL6Ids: string[]
   instructions?: string
 }): Promise<Assignment> {
-  const db = getDb()
-  const existing = db.assignments.find(
-    (a) => a.projectId === payload.projectId && a.workPackageId === payload.workPackageId && a.status === 'ACTIVE'
-  )
-  if (existing) {
-    existing.supervisorId = payload.supervisorId
-    existing.includedL6Ids = payload.includedL6Ids
-    existing.instructions = payload.instructions
-  } else {
-    db.assignments.push({
-      id: uid('a'),
-      ...payload,
-      assignedAt: todayIso(),
-      status: 'ACTIVE',
-    })
-  }
-  const supervisor = getUser(payload.supervisorId)
-  const pkg = db.activities.find((a) => a.id === payload.workPackageId)
-  db.activities.forEach((a) => {
-    if (payload.includedL6Ids.includes(a.id)) a.assigneeId = payload.supervisorId
-  })
-  pushAudit('u-mgr-01', 'WORK_ASSIGNED', 'Assignment', payload.workPackageId, {
-    package: pkg?.name ?? payload.workPackageId,
-    supervisor: supervisor?.name ?? payload.supervisorId,
-  })
-  persist()
-  return delay(300).then(() => db.assignments.find((a) => a.workPackageId === payload.workPackageId && a.status === 'ACTIVE')!)
+  return apiFetch('/assignments', { method: 'POST', body: JSON.stringify(payload) })
 }
 
-export function unassign(assignmentId: string): Promise<void> {
-  const db = getDb()
-  const asgn = db.assignments.find((a) => a.id === assignmentId)
-  if (!asgn) return Promise.resolve()
-  asgn.status = 'COMPLETED'
-  asgn.includedL6Ids.forEach((id) => {
-    const act = db.activities.find((a) => a.id === id)
-    if (act && act.assigneeId === asgn.supervisorId) act.assigneeId = undefined
-  })
-  persist()
-  return Promise.resolve()
+export async function unassign(assignmentId: string): Promise<void> {
+  await apiFetch(`/assignments/${assignmentId}`, { method: 'DELETE' })
 }
 
-export function getSupervisorWork(supervisorId: string): Promise<ScheduleActivity[]> {
-  return Promise.resolve(getDb().activities.filter((a) => a.assigneeId === supervisorId && a.level === 'L6'))
+export async function getSupervisorWork(supervisorId: string): Promise<ScheduleActivity[]> {
+  return apiFetch(`/work?supervisor_id=${encodeURIComponent(supervisorId)}`)
 }
 
-export function getSupervisorReports(supervisorId: string): Promise<DailyReport[]> {
-  return Promise.resolve(getDb().reports.filter((r) => r.supervisorId === supervisorId).sort((a, b) => +new Date(b.submittedAt) - +new Date(a.submittedAt)))
+export async function getWorkers(projectId: string, attendanceDate?: string): Promise<Worker[]> {
+  const date = attendanceDate ? `&attendance_date=${encodeURIComponent(attendanceDate)}` : ''
+  return apiFetch(`/workers?project_id=${encodeURIComponent(projectId)}${date}`)
 }
 
-export function getReports(projectId: string): Promise<DailyReport[]> {
-  return Promise.resolve(getDb().reports.filter((r) => r.projectId === projectId).sort((a, b) => +new Date(b.submittedAt) - +new Date(a.submittedAt)))
+export async function getWorkerAssignments(projectId: string, workerId?: string): Promise<WorkerTaskAssignment[]> {
+  const worker = workerId ? `&worker_id=${encodeURIComponent(workerId)}` : ''
+  return apiFetch(`/worker-assignments?project_id=${encodeURIComponent(projectId)}${worker}`)
+}
+
+export async function assignWorkerTask(payload: {
+  projectId: string
+  activityId: string
+  workerId: string
+}): Promise<WorkerTaskAssignment> {
+  return apiFetch('/worker-assignments', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export async function markWorkerAttendance(payload: {
+  projectId: string
+  workerId?: string
+  date: string
+  status: WorkerAttendanceStatus
+  reason?: string
+}): Promise<{ attendance: WorkerAttendance; reallocations: { activityId: string; activityName: string; fromWorkerId: string; toWorkerId: string | null; toWorkerName?: string; status: string; reason: string }[] }> {
+  return apiFetch('/worker-attendance', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export async function getWorkerDashboard(projectId: string): Promise<WorkerDashboardData> {
+  return apiFetch(`/workers/me/dashboard?project_id=${encodeURIComponent(projectId)}`)
+}
+
+export async function getSupervisorReports(supervisorId: string): Promise<DailyReport[]> {
+  return apiFetch(`/reports?supervisor_id=${encodeURIComponent(supervisorId)}`)
+}
+
+export async function getReports(projectId: string): Promise<DailyReport[]> {
+  return apiFetch(`/reports?project_id=${encodeURIComponent(projectId)}`)
 }
 
 export async function submitReport(payload: {
@@ -205,434 +226,246 @@ export async function submitReport(payload: {
   source: ReportSource
   rawContent: string
   fileName?: string
+  absentWorkerIds?: string[]
+  absenceDate?: string
+  absenceReason?: string
   entries: PreviewEntry[]
-}): Promise<DailyReport> {
-  const db = getDb()
-  const reportId = uid('r')
-  const now = new Date().toISOString()
-  const reportDate = todayIso()
-
-  const entries: ReportEntry[] = payload.entries.map((e) => ({
-    id: uid('re'),
-    reportId,
-    extractedText: e.extractedText,
-    status: e.status,
-    actualStart: e.actualStart,
-    actualEnd: e.actualEnd,
-    delayReason: e.delayReason,
-    delayText: e.delayText,
-  }))
-
-  const report: DailyReport = {
-    id: reportId,
-    projectId: payload.projectId,
-    supervisorId: payload.supervisorId,
-    reportDate,
-    submittedAt: now,
-    source: payload.source,
-    rawContent: payload.rawContent,
-    fileName: payload.fileName,
-    entries,
-  }
-
-  db.reports.push(report)
-
-  let autoCount = 0
-  let flaggedCount = 0
-
-  payload.entries.forEach((preview, idx) => {
-    const entry = entries[idx]
-    const match: AiMatchResult = {
-      id: uid('aim'),
-      reportEntryId: entry.id,
-      reportId,
-      projectId: payload.projectId,
-      extractedActivity: preview.extractedText,
-      matchedActivityId: preview.matchedActivityId,
-      matchedActivityName: preview.matchedActivityName,
-      status: preview.status,
-      actualStart: preview.actualStart,
-      actualEnd: preview.actualEnd,
-      delayReason: preview.delayReason,
-      delayText: preview.delayText,
-      confidence: preview.confidence,
-      band: preview.band,
-      keywords: preview.keywords,
-      candidates: preview.candidates,
-      source: payload.source,
-      createdAt: now,
-      decision: preview.band === 'AUTO' ? 'AUTO_APPROVED' : 'PENDING',
-    }
-    db.aiMatches.push(match)
-
-    if (preview.band === 'AUTO' && entry.status) {
-      autoCount++
-      applyActivityUpdate(entry.status, preview, payload.supervisorId)
-      const act = db.activities.find((a) => a.id === preview.matchedActivityId)
-      pushAudit(payload.supervisorId, 'AI_AUTO_APPROVED', 'AiMatch', match.id, {
-        extracted: preview.extractedText.slice(0, 60),
-        activity: act?.name ?? preview.matchedActivityName ?? '',
-        confidence: preview.confidence,
-      })
-    } else {
-      flaggedCount++
-    }
-  })
-
-  recomputeRollups(db.activities)
-
-  const supervisor = getUser(payload.supervisorId)
-  pushAudit(payload.supervisorId, 'REPORT_SUBMITTED', 'Report', reportId, {
-    supervisor: supervisor?.name ?? payload.supervisorId,
-    source: payload.source,
-  })
-  pushAudit(payload.supervisorId, 'AI_PROCESSED', 'Report', reportId, { matched: autoCount, flagged: flaggedCount })
-  persist()
-  return report
+}): Promise<DailyReport & { reallocations?: ReallocationResult[] }> {
+  return apiFetch('/reports', { method: 'POST', body: JSON.stringify(payload) })
 }
 
-function applyActivityUpdate(status: ActivityStatus, preview: ActivityUpdateInput, actorId: string) {
-  const db = getDb()
-  const activity = db.activities.find((a) => a.id === preview.matchedActivityId)
-  if (!activity) return
-  activity.status = status
-  activity.lastReportedAt = new Date().toISOString()
-  if (status === 'COMPLETED') {
-    activity.progressPct = 100
-    activity.actualEnd = todayIso()
-    if (!activity.actualStart) activity.actualStart = activity.plannedStart
-  }
-  if (status === 'IN_PROGRESS') {
-    activity.progressPct = Math.max(activity.progressPct, 40)
-    activity.actualStart = activity.actualStart ?? todayIso()
-  }
-  if (status === 'DELAYED') {
-    activity.progressPct = activity.progressPct || 0
-    activity.actualStart = activity.actualStart ?? todayIso()
-    const existing = db.delays.find((d) => d.activityId === activity.id && d.status === 'OPEN')
-    if (!existing) {
-      db.delays.push({
-        id: uid('d'),
-        projectId: activity.projectId,
-        activityId: activity.id,
-        reasonCode: preview.delayReason ?? 'OTHER',
-        reasonText: preview.delayText,
-        reportedAt: new Date().toISOString(),
-        status: 'OPEN',
-        daysImpact: 0,
-      })
-      pushAudit(actorId, 'DELAY_REPORTED', 'Delay', activity.id, {
-        activity: activity.name,
-        reason: preview.delayReason ?? 'OTHER',
-      })
-    }
-  }
+export async function getReconciliationQueue(projectId: string): Promise<AiMatchResult[]> {
+  return apiFetch(`/reconciliation/queue?project_id=${encodeURIComponent(projectId)}`)
 }
 
-export function getReconciliationQueue(projectId: string): Promise<AiMatchResult[]> {
-  return Promise.resolve(
-    getDb()
-      .aiMatches.filter((m) => m.projectId === projectId && m.decision === 'PENDING')
-      .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
-  )
+export async function getAutoApprovedLog(projectId: string): Promise<AiMatchResult[]> {
+  return apiFetch(`/reconciliation/auto-log?project_id=${encodeURIComponent(projectId)}`)
 }
 
-export function getAutoApprovedLog(projectId: string): Promise<AiMatchResult[]> {
-  return Promise.resolve(
-    getDb()
-      .aiMatches.filter((m) => m.projectId === projectId && m.decision !== 'PENDING')
-      .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
-  )
-}
-
-export function decideMatch(
+export async function decideMatch(
   matchId: string,
   action: 'ACCEPT' | 'CORRECT' | 'LINK' | 'ASK',
-  actorId: string,
+  _actorId: string,
   options: { activityId?: string; question?: string } = {}
 ): Promise<void> {
-  const db = getDb()
-  const match = db.aiMatches.find((m) => m.id === matchId)
-  if (!match) return Promise.resolve()
-
-  const now = new Date().toISOString()
-  match.decidedAt = now
-  match.decidedBy = actorId
-
-  if (action === 'ACCEPT') {
-    match.decision = 'ACCEPTED'
-    if (match.status) {
-      applyActivityUpdate(match.status, { matchedActivityId: match.matchedActivityId, status: match.status, delayReason: match.delayReason, delayText: match.delayText }, actorId)
-      pushAudit(actorId, 'AI_REVIEW_ACCEPTED', 'AiMatch', match.id, { activity: match.matchedActivityName ?? match.matchedActivityId ?? '' })
-    }
-  }
-
-  if ((action === 'CORRECT' || action === 'LINK') && options.activityId) {
-    match.decision = action === 'CORRECT' ? 'CORRECTED' : 'LINKED'
-    match.matchedActivityId = options.activityId
-    const act = db.activities.find((a) => a.id === options.activityId)
-    match.matchedActivityName = act?.name ?? options.activityId
-    if (match.status) {
-      applyActivityUpdate(match.status, { matchedActivityId: options.activityId, status: match.status, delayReason: match.delayReason, delayText: match.delayText }, actorId)
-      pushAudit(actorId, match.decision === 'CORRECTED' ? 'AI_CORRECTED' : 'AI_LINKED', 'AiMatch', match.id, {
-        activity: act?.name ?? options.activityId,
-      })
-    }
-  }
-
-  if (action === 'ASK' && options.question) {
-    match.decision = 'ASKED'
-    const report = db.reports.find((r) => r.id === match.reportId)
-    const supervisorId = report?.supervisorId ?? 'u-sup-01'
-    const targetActivityId = options.activityId ?? match.matchedActivityId ?? match.candidates[0]?.activityId ?? ''
-    const thread = createThread(match.projectId, targetActivityId, supervisorId, actorId, options.question, match.extractedActivity)
-    pushAudit(actorId, 'AI_ASKED', 'AiMatch', match.id, { supervisor: getUser(supervisorId)?.name ?? supervisorId })
-    pushAudit(actorId, 'QUESTION_ASKED', 'Thread', thread.id, { activity: targetActivityId })
-  }
-
-  recomputeRollups(db.activities)
-  persist()
-  return Promise.resolve()
+  await apiFetch(`/reconciliation/${matchId}/decide`, { method: 'POST', body: JSON.stringify({ action, ...options }) })
 }
 
-export function getThreads(projectId: string): Promise<ConversationThread[]> {
-  return Promise.resolve(getDb().threads.filter((t) => t.projectId === projectId).sort((a, b) => lastMessageTime(b) - lastMessageTime(a)))
+export async function getThreads(projectId: string): Promise<ConversationThread[]> {
+  return apiFetch(`/threads?project_id=${encodeURIComponent(projectId)}`)
 }
 
-export function getSupervisorThreads(supervisorId: string): Promise<ConversationThread[]> {
-  return Promise.resolve(getDb().threads.filter((t) => t.supervisorId === supervisorId).sort((a, b) => lastMessageTime(b) - lastMessageTime(a)))
+export async function getSupervisorThreads(supervisorId: string): Promise<ConversationThread[]> {
+  return apiFetch(`/threads?supervisor_id=${encodeURIComponent(supervisorId)}`)
 }
 
-export function getThread(id: string): ConversationThread | undefined {
-  return getDb().threads.find((t) => t.id === id)
+export async function getThread(id: string): Promise<ConversationThread> {
+  return apiFetch(`/threads/${id}`)
 }
 
-export function askQuestion(projectId: string, activityId: string, supervisorId: string, actorId: string, text: string): Promise<ConversationThread> {
-  const thread = createThread(projectId, activityId, supervisorId, actorId, text)
-  pushAudit(actorId, 'QUESTION_ASKED', 'Thread', thread.id, { activity: activityId })
-  persist()
-  return Promise.resolve(thread)
-}
-
-function createThread(
+export async function askQuestion(
   projectId: string,
   activityId: string,
   supervisorId: string,
-  openedBy: string,
-  text: string,
-  subject?: string
-): ConversationThread {
-  const db = getDb()
-  const now = new Date().toISOString()
-  const activity = db.activities.find((a) => a.id === activityId)
-  const threadId = uid('t')
-  const thread: ConversationThread = {
-    id: threadId,
-    projectId,
-    activityId: activityId || null,
-    supervisorId,
-    openedBy,
-    subject: subject ?? activity?.name ?? 'General question',
-    status: 'OPEN',
-    createdAt: now,
-    messages: [
-      {
-        id: uid('m'),
-        threadId,
-        senderId: openedBy,
-        text,
-        sentAt: now,
-      },
-    ],
+  _actorId: string,
+  text: string
+): Promise<ConversationThread> {
+  return apiFetch('/threads', { method: 'POST', body: JSON.stringify({ projectId, activityId, supervisorId, text }) })
+}
+
+export async function sendMessage(threadId: string, _senderId: string, text: string): Promise<Message> {
+  return apiFetch(`/threads/${threadId}/messages`, { method: 'POST', body: JSON.stringify({ text }) })
+}
+
+export async function resolveThread(threadId: string, _actorId: string): Promise<void> {
+  await apiFetch(`/threads/${threadId}/resolve`, { method: 'PATCH' })
+}
+
+export async function getDelays(projectId: string): Promise<DelayEvent[]> {
+  return apiFetch(`/delays?project_id=${encodeURIComponent(projectId)}`)
+}
+
+export async function getAudit(): Promise<AuditEvent[]> {
+  return apiFetch('/audit')
+}
+
+export async function getInsights(): Promise<InsightAggregate> {
+  return apiFetch('/insights')
+}
+
+export async function getDashboard(projectId: string): Promise<DashboardData> {
+  return apiFetch(`/dashboard/${projectId}`)
+}
+
+export async function getAtRiskActivities(projectId: string): Promise<{ activity: ScheduleActivity; reason: 'stale' | 'deadline' }[]> {
+  return apiFetch(`/delays/at-risk?project_id=${encodeURIComponent(projectId)}`)
+}
+
+export async function resetDemo(): Promise<void> {
+  await apiFetch('/dev/reset', { method: 'POST' })
+}
+
+const BACKEND_URL = API_BASE.replace(/\/api\/v1$/, '')
+
+let backendHealth: { up: boolean; at: number } | null = null
+
+async function isBackendUp(): Promise<boolean> {
+  if (backendHealth && Date.now() - backendHealth.at < 60000) return backendHealth.up
+  try {
+    const res = await fetch(`${BACKEND_URL}/`, { signal: AbortSignal.timeout(5000) })
+    backendHealth = { up: res.ok, at: Date.now() }
+  } catch {
+    backendHealth = { up: false, at: Date.now() }
   }
-  db.threads.push(thread)
-  persist()
-  return thread
+  return backendHealth.up
 }
 
-export function sendMessage(threadId: string, senderId: string, text: string): Promise<Message> {
-  const db = getDb()
-  const thread = db.threads.find((t) => t.id === threadId)
-  if (!thread) throw new Error('Thread not found')
-  const message: Message = {
-    id: uid('m'),
-    threadId,
-    senderId,
-    text,
-    sentAt: new Date().toISOString(),
+interface BackendAnalyzeCandidate {
+  activityId: string
+  name: string
+  discipline: null
+  confidence: number
+}
+
+interface BackendAnalyzeEntry {
+  extractedText: string
+  matchedActivityId: string | null
+  matchedActivityName?: string
+  status: ActivityStatus | null
+  actualStart?: string
+  actualEnd?: string
+  delayReason?: DelayReasonCode | null
+  delayText?: string
+  confidence: number
+  keywords: string[]
+  candidates: BackendAnalyzeCandidate[]
+}
+
+function bandFor(pct: number): PreviewEntry['band'] {
+  return pct >= APP_CONFIG.CONFIDENCE_AUTO ? 'AUTO' : pct >= APP_CONFIG.CONFIDENCE_REVIEW ? 'REVIEW' : 'UNMATCHED'
+}
+
+async function analyzeWithBackend(rawText: string): Promise<PreviewEntry[] | null> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/v1/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report_text: rawText }),
+      signal: AbortSignal.timeout(180000),
+    })
+    if (!res.ok) return null
+    const d = (await res.json()) as { entries?: BackendAnalyzeEntry[] }
+    if (!Array.isArray(d.entries)) return null
+    return d.entries
+      .filter((e) => e && typeof e.extractedText === 'string' && typeof e.confidence === 'number')
+      .map((e) => ({
+        tempId: uid('p'),
+        extractedText: e.extractedText,
+        matchedActivityId: e.matchedActivityId ?? null,
+        matchedActivityName: e.matchedActivityName,
+        status: e.status ?? null,
+        actualStart: e.actualStart,
+        actualEnd: e.actualEnd,
+        delayReason: e.delayReason ?? null,
+        delayText: e.delayText,
+        confidence: e.confidence,
+        band: bandFor(e.confidence),
+        keywords: Array.isArray(e.keywords) ? e.keywords : [],
+        candidates: Array.isArray(e.candidates) ? e.candidates : [],
+      }))
+  } catch {
+    return null
   }
-  thread.messages.push(message)
-  pushAudit(senderId, 'REPLY_SENT', 'Thread', threadId, { actor: getUser(senderId)?.name ?? senderId })
-  persist()
-  return Promise.resolve(message)
 }
 
-export function resolveThread(threadId: string, actorId: string): Promise<void> {
-  const db = getDb()
-  const thread = db.threads.find((t) => t.id === threadId)
-  if (!thread) return Promise.resolve()
-  thread.status = thread.status === 'RESOLVED' ? 'OPEN' : 'RESOLVED'
-  if (thread.status === 'RESOLVED') {
-    pushAudit(actorId, 'THREAD_RESOLVED', 'Thread', threadId, {})
-  }
-  persist()
-  return Promise.resolve()
-}
-
-export function getDelays(projectId: string): Promise<DelayEvent[]> {
-  return Promise.resolve(getDb().delays.filter((d) => d.projectId === projectId).sort((a, b) => +new Date(b.reportedAt) - +new Date(a.reportedAt)))
-}
-
-export function getAudit(): Promise<AuditEvent[]> {
-  const events = getDb().audit
-  return Promise.resolve(events.slice().sort((a, b) => +new Date(b.timestamp) - +new Date(a.timestamp)))
-}
-
-export function getInsights(): Promise<InsightAggregate> {
-  return Promise.resolve(getDb().insights)
-}
-
-export function getDashboard(projectId: string): Promise<DashboardData> {
-  const db = getDb()
-  const project = getProject(projectId)
-  if (!project) throw new Error('Project not found')
-
-  const l6 = db.activities.filter((a) => a.projectId === projectId && a.level === 'L6')
-  const total = l6.length || 1
-  const completed = l6.filter((a) => a.status === 'COMPLETED').length
-  const overallProgress = Math.round(l6.reduce((sum, a) => sum + a.progressPct, 0) / total)
-  const plannedProgress = Math.round((l6.filter((a) => parseIso(a.plannedEnd).getTime() <= new Date().getTime()).length / total) * 100)
-
-  const openDelays = db.delays.filter((d) => d.projectId === projectId && d.status === 'OPEN').length
-  const pendingReviews = db.aiMatches.filter((m) => m.projectId === projectId && m.decision === 'PENDING').length
-  const awaitingReply = db.threads.filter((t) => t.projectId === projectId && t.status === 'OPEN' && lastSenderIs(t, 'manager')).length
-  const daysRemaining = Math.max(0, Math.round((parseIso(project.plannedEnd).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))
-
-  const disciplineProgress = Array.from(new Set(l6.map((a) => a.discipline).filter((d): d is Discipline => Boolean(d)))).map((disc) => {
-    const group = l6.filter((a) => a.discipline === disc)
-    const planned = Math.round((group.filter((a) => parseIso(a.plannedEnd).getTime() <= new Date().getTime()).length / group.length) * 100)
-    return {
-      discipline: disc,
-      progress: Math.round(group.reduce((sum, a) => sum + a.progressPct, 0) / group.length),
-      planned,
-      colorClass: disciplineColor(disc),
-    }
-  })
-
-  const delayedActivities = l6
-    .filter((a) => a.status === 'DELAYED')
-    .map((a) => {
-      const delay = db.delays.find((d) => d.activityId === a.id && d.status === 'OPEN')
+async function refreshWithBackend(entries: PreviewEntry[]): Promise<PreviewEntry[]> {
+  const settled = await Promise.allSettled(
+    entries.map(async (e) => {
+      const res = await fetch(`${BACKEND_URL}/api/v1/execution-reports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          activity_description: e.extractedText,
+          discipline: 'General',
+          asset_id: e.matchedActivityId ?? '',
+          actual_start: e.actualStart ?? null,
+          actual_end: e.actualEnd ?? null,
+          status: (e.status && FRONT_STATUS_TO_BACKEND[e.status]) || 'Unknown',
+          source: 'DPR',
+        }),
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!res.ok) return e
+      const d = (await res.json()) as BackendExecutionResponse
+      if (!d.matched_schedule_activity_id || typeof d.confidence_score !== 'number') return e
+      const pct = Math.round(d.confidence_score * 100)
+      const band: PreviewEntry['band'] = bandFor(pct)
       return {
-        activity: a,
-        daysLate: delay ? daysSince(delay.reportedAt) : 0,
-        reason: delay?.reasonCode,
+        ...e,
+        matchedActivityId: d.matched_schedule_activity_id,
+        matchedActivityName: d.matched_activity_description ?? e.matchedActivityName,
+        confidence: pct,
+        band,
+        candidates: (d.top_matches ?? []).map((m) => ({
+          activityId: m.schedule_activity_id,
+          name: m.activity_description,
+          discipline: null,
+          confidence: Math.round(m.score * 100),
+        })),
       }
     })
-
-  const recentAudit = db.audit.slice(0, 8)
-  const progressTrend = buildProgressTrend(l6, project)
-
-  return Promise.resolve({
-    overallProgress,
-    plannedProgress,
-    completedCount: completed,
-    totalCount: total,
-    openDelays,
-    pendingReviews,
-    awaitingReply,
-    daysRemaining,
-    disciplineProgress,
-    delayedActivities,
-    recentAudit,
-    progressTrend,
-  })
+  )
+  return settled.map((r, i) => (r.status === 'fulfilled' ? r.value : entries[i]))
 }
 
-function buildProgressTrend(l6: ScheduleActivity[], project: Project): { label: string; planned: number; actual: number }[] {
-  const months: string[] = []
-  const start = parseIso(project.startDate)
-  const end = parseIso(project.plannedEnd)
-  let cursor = new Date(start)
-  while (cursor <= end) {
-    months.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-01`)
-    cursor.setMonth(cursor.getMonth() + 1)
-  }
-  const now = new Date().getTime()
-  return months.map((m) => {
-    const monthEnd = new Date(new Date(m).getFullYear(), new Date(m).getMonth() + 1, 0).getTime()
-    const planned = Math.round((l6.filter((a) => parseIso(a.plannedEnd).getTime() <= monthEnd).length / l6.length) * 100)
-    const actual = monthEnd <= now ? Math.round((l6.filter((a) => a.status === 'COMPLETED' && parseIso(a.actualEnd || a.plannedEnd).getTime() <= monthEnd).length / l6.length) * 100) : 0
-    return { label: monthLabel(m, 'en'), planned, actual }
-  })
+const FRONT_STATUS_TO_BACKEND: Record<string, string> = {
+  NOT_STARTED: 'Not Started',
+  IN_PROGRESS: 'In Progress',
+  COMPLETED: 'Completed',
+  DELAYED: 'Delayed',
+  ON_HOLD: 'On Hold',
 }
 
-export function getAtRiskActivities(projectId: string): Promise<{ activity: ScheduleActivity; reason: 'stale' | 'deadline' }[]> {
-  const db = getDb()
-  const l6 = db.activities.filter((a) => a.projectId === projectId && a.level === 'L6')
-  const now = new Date().getTime()
-  const result: { activity: ScheduleActivity; reason: 'stale' | 'deadline' }[] = []
-  l6.forEach((a) => {
-    if (a.status === 'COMPLETED' || a.status === 'NOT_STARTED') return
-    const plannedEnd = parseIso(a.plannedEnd).getTime()
-    const daysLeft = Math.round((plannedEnd - now) / (1000 * 60 * 60 * 24))
-    if (a.status === 'IN_PROGRESS' && a.lastReportedAt && daysSince(a.lastReportedAt) > APP_CONFIG.STALE_DAYS) {
-      result.push({ activity: a, reason: 'stale' })
-    } else if (daysLeft <= APP_CONFIG.RISK_NEAR_DAYS && daysLeft >= 0 && a.progressPct < 60) {
-      result.push({ activity: a, reason: 'deadline' })
+interface BackendTopMatch {
+  schedule_activity_id: string
+  activity_description: string
+  score: number
+}
+
+interface BackendExecutionResponse {
+  matched_schedule_activity_id: string | null
+  matched_activity_description: string | null
+  confidence_score: number | null
+  top_matches: BackendTopMatch[]
+}
+
+export const aiService = {
+  async processReport(
+    rawText: string,
+    ctx: { projectId: string; supervisorId: string; source: ReportSource; language: string }
+  ): Promise<PreviewEntry[]> {
+    if (BACKEND_ANALYZE && (await isBackendUp())) {
+      const live = await analyzeWithBackend(rawText)
+      if (live) return live
     }
-  })
-  return Promise.resolve(result)
-}
-
-export function resetDemo(): void {
-  resetDb()
-}
-
-function pushAudit(actorId: string, action: AuditEvent['action'], entityType: string, entityId: string, params: Record<string, string | number>) {
-  const db = getDb()
-  db.audit.push({
-    id: uid('ae'),
-    actorId,
-    action,
-    entityType,
-    entityId,
-    descriptionParams: params,
-    timestamp: new Date().toISOString(),
-  })
-}
-
-function lastMessageTime(thread: ConversationThread): number {
-  const last = thread.messages[thread.messages.length - 1]
-  return last ? new Date(last.sentAt).getTime() : new Date(thread.createdAt).getTime()
-}
-
-function lastSenderIs(thread: ConversationThread, role: 'manager' | 'supervisor'): boolean {
-  const last = thread.messages[thread.messages.length - 1]
-  if (!last) return false
-  const user = getUser(last.senderId)
-  return user?.role === role
-}
-
-function daysSince(iso: string): number {
-  return Math.floor((new Date().getTime() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24))
-}
-
-function disciplineColor(disc: string | null): string {
-  switch (disc) {
-    case 'CIVIL':
-      return 'bg-amber-500'
-    case 'PIPING':
-      return 'bg-sky-500'
-    case 'ELECTRICAL':
-      return 'bg-yellow-500'
-    case 'INSTRUMENTATION':
-      return 'bg-violet-500'
-    case 'EQUIPMENT':
-      return 'bg-orange-500'
-    case 'HSE':
-      return 'bg-emerald-500'
-    default:
-      return 'bg-slate-500'
-  }
+    const db = getDb()
+    const allActivities = db.activities.filter((a) => a.projectId === ctx.projectId)
+    const assignedActivities = allActivities.filter((a) => a.assigneeId === ctx.supervisorId && a.level === 'L6')
+    const previews = analyzeReport(rawText, {
+      projectId: ctx.projectId,
+      supervisorId: ctx.supervisorId,
+      source: ctx.source,
+      assignedActivities,
+      allActivities,
+      language: ctx.language,
+    })
+    if (BACKEND_ANALYZE && (await isBackendUp())) {
+      try {
+        return await refreshWithBackend(previews)
+      } catch {
+        return previews
+      }
+    }
+    return previews
+  },
 }

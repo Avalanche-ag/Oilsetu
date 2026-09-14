@@ -4,8 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../store/auth'
 import { useUi } from '../../store/ui'
-import { getUser, getSupervisorThreads, resetDemo } from '../../services/api'
-import { getDb } from '../../mocks/db'
+import { getProjects, getSupervisorThreads, resetDemo } from '../../services/api'
 import { Icon } from '../ui/Icon'
 import { LanguageToggle } from '../shared/LanguageToggle'
 import { Avatar } from '../ui/Avatar'
@@ -25,7 +24,9 @@ export function SupervisorLayout() {
   const navigate = useNavigate()
   const logout = useAuth((s) => s.logout)
   const userId = useAuth((s) => s.userId)
-  const user = userId ? getUser(userId) : undefined
+  const user = useAuth((s) => s.user)
+  const ready = useAuth((s) => s.ready)
+  const boot = useAuth((s) => s.boot)
   const [resetOpen, setResetOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const push = useToast((s) => s.push)
@@ -33,10 +34,17 @@ export function SupervisorLayout() {
   const setActiveProjectId = useUi((s) => s.setActiveProjectId)
 
   useEffect(() => {
-    if (!activeProjectId) {
-      const p = getDb().projects.find((p) => p.status === 'ACTIVE')
-      if (p) setActiveProjectId(p.id)
-    }
+    boot()
+  }, [boot])
+
+  useEffect(() => {
+    getProjects()
+      .then((ps) => {
+        const current = ps.find((project) => project.id === activeProjectId)
+        const fallback = ps.find((project) => project.status === 'ACTIVE') ?? ps[0]
+        if (!current && fallback) setActiveProjectId(fallback.id)
+      })
+      .catch(() => {})
   }, [activeProjectId, setActiveProjectId])
 
   const { data: threads = [] } = useQuery({
@@ -58,12 +66,20 @@ export function SupervisorLayout() {
     navigate('/login')
   }
 
-  const handleReset = () => {
-    resetDemo()
+  const handleReset = async () => {
+    await resetDemo()
     setResetOpen(false)
     push(t('toast.demoReset'), 'success')
     navigate('/login')
     window.location.reload()
+  }
+
+  if (!ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100">
+        <div className="text-sm font-medium text-slate-500">{t('common.loading')}</div>
+      </div>
+    )
   }
 
   return (

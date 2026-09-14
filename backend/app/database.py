@@ -27,6 +27,7 @@ class ScheduleActivity(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     schedule_activity_id = Column(String, unique=True, index=True, nullable=False)
+    project_id = Column(String, nullable=True, index=True)
     activity_description = Column(Text, nullable=False)
     discipline = Column(String, nullable=True)
     wbs_id = Column(String, nullable=True)
@@ -38,6 +39,13 @@ class ScheduleActivity(Base):
     percent_complete = Column(Float, nullable=True)
     schedule_status = Column(String, nullable=True)
     asset_id = Column(String, nullable=True)
+    parent_id = Column(String, nullable=True)
+    assignee_id = Column(String, nullable=True)
+    actual_start = Column(String, nullable=True)
+    actual_end = Column(String, nullable=True)
+    last_reported_at = Column(String, nullable=True)
+    weightage = Column(Float, default=0)
+    baseline_version = Column(String, default="v1")
 
 class VisualProof(Base):
     __tablename__ = "visual_proofs"

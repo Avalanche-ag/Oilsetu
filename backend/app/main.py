@@ -1,6 +1,7 @@
 import io
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from .database import get_db, create_tables, ScheduleActivity, ExecutionReport
@@ -16,13 +17,47 @@ from .schemas.activity import (
     MatchCandidate
 )
 from .geotagged_proof.router import router as visual_proof_router
+from .ai_analyze import router as ai_analyze_router
+from . import models  # noqa: F401  (register ORM tables)
+from .routers import (
+    assignments,
+    audit,
+    auth,
+    dashboard,
+    delays,
+    dev,
+    insights,
+    projects,
+    reports,
+    threads,
+    workers,
+)
 
 app = FastAPI(
     title="SIH-26122 Infrastructure Planning-to-Execution Bridge API",
     version="1.0.0",
     description="Oil India Limited Backend API connecting L5/L6 baseline schedule activities with AI/NLP extracted site execution reports."
 )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(visual_proof_router)
+app.include_router(ai_analyze_router)
+app.include_router(auth.router)
+app.include_router(projects.router)
+app.include_router(assignments.router)
+app.include_router(reports.router)
+app.include_router(threads.router)
+app.include_router(workers.router)
+app.include_router(delays.router)
+app.include_router(audit.router)
+app.include_router(dashboard.router)
+app.include_router(insights.router)
+app.include_router(dev.router)
 
 
 @app.on_event("startup")
@@ -194,13 +229,13 @@ def process_execution_report(activity: ActivityRequest, db: Session) -> Dict[str
     return {
         "id": report_record.id,
         "activity_description": report_record.activity_description,
-        "discipline": report_record.discipline,
-        "asset_id": report_record.asset_id,
-        "actual_start": report_record.actual_start,
-        "actual_end": report_record.actual_end,
-        "status": report_record.status,
+        "discipline": report_record.discipline or "",
+        "asset_id": report_record.asset_id or "",
+        "actual_start": report_record.actual_start or "",
+        "actual_end": report_record.actual_end or "",
+        "status": report_record.status or "In Progress",
         "delay_reason": report_record.delay_reason,
-        "source": report_record.source,
+        "source": report_record.source or "DPR",
         "matched_schedule_activity_id": matched_id,
         "matched_activity_description": matched_desc,
         "confidence_level": confidence,

@@ -1,7 +1,6 @@
 import { HashRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuth } from './store/auth'
-import { getUser } from './services/api'
 import { ManagerLayout } from './components/layout/ManagerLayout'
 import { SupervisorLayout } from './components/layout/SupervisorLayout'
 import { LoginPage } from './pages/LoginPage'
@@ -20,26 +19,28 @@ import { MyWorkPage } from './pages/supervisor/MyWorkPage'
 import { ReportPage } from './pages/supervisor/ReportPage'
 import { HistoryPage } from './pages/supervisor/HistoryPage'
 import { ChatPage } from './pages/supervisor/ChatPage'
+import { WorkerLayout } from './components/layout/WorkerLayout'
+import { WorkerDashboardPage } from './pages/worker/DashboardPage'
 import { Toaster } from './components/ui'
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { staleTime: 1000 * 30, refetchOnWindowFocus: false },
+    queries: { staleTime: 1000 * 30, refetchOnWindowFocus: false, refetchInterval: 1000 * 15 },
   },
 })
 
 function RootRedirect() {
   const userId = useAuth((s) => s.userId)
+  const role = useAuth((s) => s.role)
   if (!userId) return <Navigate to="/login" replace />
-  const user = getUser(userId)
-  return <Navigate to={user?.role === 'manager' ? '/m/dashboard' : '/s/dashboard'} replace />
+  return <Navigate to={role === 'manager' ? '/m/dashboard' : role === 'supervisor' ? '/s/dashboard' : '/w/dashboard'} replace />
 }
 
-function RequireRole({ role }: { role: 'manager' | 'supervisor' }) {
+function RequireRole({ role }: { role: 'manager' | 'supervisor' | 'worker' }) {
   const userId = useAuth((s) => s.userId)
-  if (!userId) return <Navigate to="/login" replace />
-  const user = getUser(userId)
-  if (user?.role !== role) return <Navigate to={user?.role === 'manager' ? '/m/dashboard' : '/s/dashboard'} replace />
+  const userRole = useAuth((s) => s.role)
+  if (!userId || !userRole) return <Navigate to="/login" replace />
+  if (userRole !== role) return <Navigate to={userRole === 'manager' ? '/m/dashboard' : userRole === 'supervisor' ? '/s/dashboard' : '/w/dashboard'} replace />
   return <Outlet />
 }
 
@@ -73,6 +74,12 @@ export function App() {
               <Route path="report" element={<ReportPage />} />
               <Route path="history" element={<HistoryPage />} />
               <Route path="chat" element={<ChatPage />} />
+            </Route>
+          </Route>
+          <Route element={<RequireRole role="worker" />}>
+            <Route path="/w" element={<WorkerLayout />}>
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard" element={<WorkerDashboardPage />} />
             </Route>
           </Route>
           <Route path="*" element={<RootRedirect />} />

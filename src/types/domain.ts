@@ -1,4 +1,4 @@
-export type Role = 'manager' | 'supervisor'
+export type Role = 'manager' | 'supervisor' | 'worker'
 export type Lang = 'en' | 'hi'
 
 export type Discipline =
@@ -60,6 +60,10 @@ export type AuditAction =
   | 'THREAD_RESOLVED'
   | 'DELAY_REPORTED'
   | 'LOGIN'
+  | 'WORKER_TASK_ASSIGNED'
+  | 'WORKER_ATTENDANCE_UPDATED'
+  | 'TASK_REALLOCATED'
+  | 'TASK_UNALLOCATED'
 
 export interface User {
   id: string
@@ -69,6 +73,65 @@ export interface User {
   phone?: string
   preferredLanguage: Lang
   avatarInitials: string
+}
+
+export type WorkerAttendanceStatus = 'PRESENT' | 'ABSENT' | 'PTO' | 'LEAVE'
+
+export interface Worker {
+  id: string
+  userId: string
+  projectId: string
+  name: string
+  discipline: Discipline
+  workload: number
+  activeTaskCount: number
+  availability: number
+  status: 'ACTIVE' | 'INACTIVE'
+  attendanceStatus?: WorkerAttendanceStatus | null
+}
+
+export interface WorkerAttendance {
+  id: string
+  projectId: string
+  workerId: string
+  date: string
+  status: WorkerAttendanceStatus
+  reason?: string | null
+  reportedBy: string
+  createdAt: string
+}
+
+export interface WorkerTaskAssignment {
+  id: string
+  projectId: string
+  activityId: string
+  activityName: string
+  activityStatus?: ActivityStatus | null
+  progressPct?: number
+  workerId: string
+  assignedBy: string
+  assignedAt: string
+  source: 'MANUAL' | 'AUTO_REALLOCATION' | 'SEED'
+  replacedWorkerId?: string | null
+  reason?: string | null
+  status: 'ACTIVE' | 'REPLACED' | 'COMPLETED'
+}
+
+export interface ReallocationResult {
+  activityId: string
+  activityName: string
+  fromWorkerId: string
+  toWorkerId: string | null
+  toWorkerName?: string
+  status: 'REALLOCATED' | 'UNALLOCATED'
+  reason: string
+}
+
+export interface WorkerDashboardData {
+  worker: Worker
+  attendance: WorkerAttendance[]
+  assignments: WorkerTaskAssignment[]
+  summary: { presentDays: number; absentDays: number; leaveDays: number }
 }
 
 export interface Project {

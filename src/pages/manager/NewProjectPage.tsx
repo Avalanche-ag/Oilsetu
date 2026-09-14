@@ -56,7 +56,7 @@ export function NewProjectPage() {
     setTimeout(() => setParseProgress(80), 1100)
     const project = createMutation.data
     if (!project) return
-    const result = await uploadSchedule(project.id, file.name)
+    const result = await uploadSchedule(project.id, file)
     setParseProgress(100)
     setParseResult(result)
     setParsing(false)

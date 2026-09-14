@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { getUser, getSupervisorWork, getSupervisorThreads, getSupervisorReports } from '../../services/api'
 import { Card, CardBody, Button, StatusChip, Icon } from '../../components/ui'
+import { WorkerManagementPanel } from '../../components/shared/WorkerManagementPanel'
 
 export function SupervisorDashboardPage() {
   const { t } = useTranslation()
@@ -61,6 +62,8 @@ export function SupervisorDashboardPage() {
         <StatBox value={stats.inProgress} label={t('status.IN_PROGRESS')} color="text-blue-600" />
         <StatBox value={stats.delayed} label={t('status.DELAYED')} color="text-rose-600" />
       </div>
+
+      <WorkerManagementPanel />
 
       <Card>
         <CardBody>

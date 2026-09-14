@@ -4,12 +4,12 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { useUi } from '../../store/ui'
-import { aiService, submitReport, getSupervisorReports } from '../../services/api'
+import { aiService, submitReport, getSupervisorReports, getWorkers } from '../../services/api'
 import { todayIso } from '../../utils/dates'
 import { PageHeader, Card, CardBody, Button, SegmentedTabs, Textarea, Select, BandChip, ConfidenceMeter, Chip, SimulatedAiTag, TimeAgo, Icon } from '../../components/ui'
 import { DisciplineChip } from '../../components/ui/DisciplineChip'
 import { useToast } from '../../store/toast'
-import type { PreviewEntry, ActivityStatus, DelayReasonCode } from '../../types/domain'
+import type { PreviewEntry, ActivityStatus, DelayReasonCode, ReallocationResult } from '../../types/domain'
 import { DELAY_REASONS } from '../../config/constants'
 
 const DEMO_TEXT = {
@@ -38,8 +38,12 @@ export function ReportPage() {
   const [transcribing, setTranscribing] = useState(false)
   const [fileName, setFileName] = useState('')
   const [extracting, setExtracting] = useState(false)
+  const [absentWorkerIds, setAbsentWorkerIds] = useState<string[]>([])
+  const [absenceReason, setAbsenceReason] = useState('')
+  const [reallocations, setReallocations] = useState<ReallocationResult[]>([])
 
   const { data: reports = [] } = useQuery({ queryKey: ['supReports', userId], queryFn: () => getSupervisorReports(userId || ''), enabled: Boolean(userId) })
+  const { data: workers = [] } = useQuery({ queryKey: ['workers', activeProjectId], queryFn: () => getWorkers(activeProjectId || '', todayIso()), enabled: Boolean(activeProjectId) })
   const todayReports = reports.filter((r) => r.reportDate === todayIso())
 
   const analyze = async () => {
@@ -57,14 +61,18 @@ export function ReportPage() {
 
   const submit = async () => {
     if (!activeProjectId || !userId || entries.length === 0) return
-    await submitReport({
+    const result = await submitReport({
       projectId: activeProjectId,
       supervisorId: userId,
       source: tab === 'file' ? 'FILE' : tab === 'voice' ? 'VOICE' : 'TEXT',
       rawContent: rawText,
       fileName: tab === 'file' ? fileName || 'upload.pdf' : undefined,
+      absentWorkerIds,
+      absenceDate: todayIso(),
+      absenceReason: absenceReason || undefined,
       entries,
     })
+    setReallocations(result.reallocations ?? [])
     push(t('toast.reportSubmitted'), 'success')
     qc.invalidateQueries()
     setSubmitted(true)
@@ -126,8 +134,20 @@ export function ReportPage() {
               {reviewCount > 0 && <Chip color="amber">{t('sup.report.reviewCount', { n: reviewCount })}</Chip>}
               {unmatchedCount > 0 && <Chip color="rose">{t('sup.report.unmatchedCount', { n: unmatchedCount })}</Chip>}
             </div>
+            {reallocations.length > 0 && (
+              <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-left">
+                <div className="text-sm font-semibold text-blue-900">{t('worker.reallocationTitle')}</div>
+                <div className="mt-2 space-y-1 text-xs text-blue-800">
+                  {reallocations.map((item) => (
+                    <div key={`${item.activityId}-${item.fromWorkerId}`}>
+                      {item.activityName}: {item.fromWorkerId} → {item.toWorkerId ?? t('worker.unallocated')}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="mt-5 flex justify-center gap-2">
-              <Button variant="secondary" onClick={() => { setSubmitted(false); setEntries([]); setRawText(''); setFileName('') }}>{t('sup.report.reportMore')}</Button>
+              <Button variant="secondary" onClick={() => { setSubmitted(false); setEntries([]); setRawText(''); setFileName(''); setAbsentWorkerIds([]); setAbsenceReason(''); setReallocations([]) }}>{t('sup.report.reportMore')}</Button>
               <Button variant="primary" onClick={() => navigate('/s/history')}>{t('sup.report.viewHistory')}</Button>
             </div>
           </CardBody>
@@ -225,6 +245,28 @@ export function ReportPage() {
               {analyzing ? t('sup.report.analyzing') : t('sup.report.analyze')}
             </Button>
           </div>
+
+          {workers.length > 0 && (
+            <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="text-sm font-semibold text-slate-800">{t('worker.attendanceForReport')}</div>
+              <div className="mt-1 text-xs text-slate-500">{t('worker.attendanceForReportHint')}</div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {workers.map((worker) => (
+                  <label key={worker.id} className="flex items-center gap-2 rounded border border-slate-200 bg-white p-2 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={absentWorkerIds.includes(worker.id)}
+                      onChange={() => setAbsentWorkerIds((current) => current.includes(worker.id) ? current.filter((id) => id !== worker.id) : [...current, worker.id])}
+                    />
+                    <span>{worker.name} · {worker.discipline}</span>
+                  </label>
+                ))}
+              </div>
+              {absentWorkerIds.length > 0 && (
+                <input value={absenceReason} onChange={(e) => setAbsenceReason(e.target.value)} placeholder={t('worker.reasonPlaceholder')} className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" />
+              )}
+            </div>
+          )}
 
           {entries.length > 0 && (
             <div className="mt-6 border-t border-slate-100 pt-4">

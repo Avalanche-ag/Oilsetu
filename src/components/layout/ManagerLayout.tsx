@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../store/auth'
 import { useUi } from '../../store/ui'
-import { getDashboard, getProjects, getUser, resetDemo } from '../../services/api'
+import { getDashboard, getProjects, resetDemo } from '../../services/api'
 import { Icon } from '../ui/Icon'
 import { LanguageToggle } from '../shared/LanguageToggle'
 import { Avatar } from '../ui/Avatar'
@@ -27,8 +27,9 @@ export function ManagerLayout() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const logout = useAuth((s) => s.logout)
-  const userId = useAuth((s) => s.userId)
-  const user = userId ? getUser(userId) : undefined
+  const user = useAuth((s) => s.user)
+  const ready = useAuth((s) => s.ready)
+  const boot = useAuth((s) => s.boot)
   const activeProjectId = useUi((s) => s.activeProjectId)
   const setActiveProjectId = useUi((s) => s.setActiveProjectId)
   const [resetOpen, setResetOpen] = useState(false)
@@ -45,7 +46,11 @@ export function ManagerLayout() {
   const currentProject = projects.find((p) => p.id === activeProjectId) ?? projects[0]
 
   useEffect(() => {
-    if (!activeProjectId && currentProject) {
+    boot()
+  }, [boot])
+
+  useEffect(() => {
+    if (currentProject && currentProject.id !== activeProjectId) {
       setActiveProjectId(currentProject.id)
     }
   }, [activeProjectId, currentProject, setActiveProjectId])
@@ -61,12 +66,20 @@ export function ManagerLayout() {
     navigate('/login')
   }
 
-  const handleReset = () => {
-    resetDemo()
+  const handleReset = async () => {
+    await resetDemo()
     setResetOpen(false)
     push(t('toast.demoReset'), 'success')
     navigate('/login')
     window.location.reload()
+  }
+
+  if (!ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100">
+        <div className="text-sm font-medium text-slate-500">{t('common.loading')}</div>
+      </div>
+    )
   }
 
   return (

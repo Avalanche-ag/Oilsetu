@@ -50,7 +50,8 @@ def safe_date_str(val: Any) -> Union[str, None]:
 
 def import_schedule_excel(
     file_source: Union[str, Path, io.BytesIO],
-    db_session: Session = None
+    db_session: Session = None,
+    project_id: str = None
 ) -> Dict[str, Any]:
     """
     Reads, validates, cleans, and imports baseline schedule activities from Excel.
@@ -146,9 +147,12 @@ def import_schedule_excel(
                 existing.schedule_status = status
                 if asset_id:
                     existing.asset_id = asset_id
+                if project_id:
+                    existing.project_id = project_id
             else:
                 new_activity = ScheduleActivity(
                     schedule_activity_id=act_id,
+                    project_id=project_id,
                     activity_description=desc,
                     discipline=discipline,
                     wbs_id=wbs_id,

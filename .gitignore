@@ -6,6 +6,12 @@ dist
 .idea
 .brain/
 .opencode/
+.env
+.env.local
+data/
+raw data/
+*.db
+*.db-journal
 
 # Python backend
 __pycache__/
