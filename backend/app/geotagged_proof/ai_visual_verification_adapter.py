@@ -1,28 +1,21 @@
-from pathlib import Path
-
 from .visual_verifier import verify_photo
 
 
-if __name__ == "__main__":
+def run_visual_verification(
+    activity_description,
+    image_path
+):
+    """
+    Adapter for the Gemini visual verification function.
 
-    print("AI Visual Verification Test")
-    print("===========================\n")
+    Visual verification only:
+    - activity description
+    - uploaded photo
 
-    image = input("Enter image path: ").strip()
-    activity = input("Enter the task to compare the image with: ").strip()
+    No GPS, location, EXIF, or timestamp verification.
+    """
 
-    image_path = Path(image)
-
-    if not image_path.exists():
-        print("\nERROR: Image file not found.")
-        print("Checked path:", image_path)
-        raise SystemExit(1)
-
-    result = verify_photo(
-        activity,
-        str(image_path)
+    return verify_photo(
+        activity_description,
+        image_path
     )
-
-    print("\nVISUAL VERIFICATION RESULT")
-    print("==========================")
-    print(result)
