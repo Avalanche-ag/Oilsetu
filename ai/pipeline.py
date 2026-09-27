@@ -93,7 +93,11 @@ def run_pipeline(
     print("Sending text to AI...")
 
     response = client.chat.completions.create(
+<<<<<<< HEAD
         model="gemini-3.5-flash-lite",
+=======
+        model="gemini-3.5-flash",
+>>>>>>> origin/sih-26122-backend
         messages=[
             {
                 "role": "user",
