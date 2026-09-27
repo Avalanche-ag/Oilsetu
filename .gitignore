@@ -6,3 +6,10 @@ dist
 .idea
 .brain/
 .opencode/
+__pycache__/
+*.py[cod]
+backend/venv/
+oilsetu.db
+*.db
+.env
+ai/*.docx
