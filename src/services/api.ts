@@ -92,6 +92,16 @@ export async function loginWithPassword(email: string, password: string): Promis
   return data
 }
 
+export async function registerUser(payload: { email: string; password: string; name: string; role: 'supervisor' | 'worker' }): Promise<{ token: string; user: User }> {
+  const data = await apiFetch<{ token: string; user: User }>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  setAuthToken(data.token)
+  userCache.set(data.user.id, data.user)
+  return data
+}
+
 export async function loginAsDemo(userId: string): Promise<{ token: string; user: User }> {
   const data = await apiFetch<{ token: string; user: User }>('/auth/demo-login', {
     method: 'POST',

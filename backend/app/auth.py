@@ -34,9 +34,13 @@ def verify_password(password: str, stored: str) -> bool:
     return secrets.compare_digest(check, digest)
 
 
-def create_token(user_id: str, role: str) -> str:
+def create_token(user_id: str, role: str, email: str = "") -> str:
     now = int(time.time())
-    return jwt.encode({"sub": user_id, "role": role, "iat": now, "exp": now + TOKEN_TTL_SECONDS}, SECRET, algorithm=ALGORITHM)
+    return jwt.encode(
+        {"sub": user_id, "email": email, "role": role, "iat": now, "exp": now + TOKEN_TTL_SECONDS},
+        SECRET,
+        algorithm=ALGORITHM,
+    )
 
 
 def decode_token(token: str) -> Optional[dict]:

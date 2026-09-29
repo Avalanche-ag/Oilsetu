@@ -22,6 +22,7 @@ import { ChatPage } from './pages/supervisor/ChatPage'
 import { WorkerLayout } from './components/layout/WorkerLayout'
 import { WorkerDashboardPage } from './pages/worker/DashboardPage'
 import { Toaster } from './components/ui'
+import type { Role } from './types/domain'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,11 +37,11 @@ function RootRedirect() {
   return <Navigate to={role === 'manager' ? '/m/dashboard' : role === 'supervisor' ? '/s/dashboard' : '/w/dashboard'} replace />
 }
 
-function RequireRole({ role }: { role: 'manager' | 'supervisor' | 'worker' }) {
+function ProtectedRoute({ allowedRoles }: { allowedRoles: Role[] }) {
   const userId = useAuth((s) => s.userId)
   const userRole = useAuth((s) => s.role)
   if (!userId || !userRole) return <Navigate to="/login" replace />
-  if (userRole !== role) return <Navigate to={userRole === 'manager' ? '/m/dashboard' : userRole === 'supervisor' ? '/s/dashboard' : '/w/dashboard'} replace />
+  if (!allowedRoles.includes(userRole)) return <Navigate to={userRole === 'manager' ? '/m/dashboard' : userRole === 'supervisor' ? '/s/dashboard' : '/w/dashboard'} replace />
   return <Outlet />
 }
 
@@ -51,7 +52,7 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<RootRedirect />} />
-          <Route element={<RequireRole role="manager" />}>
+          <Route element={<ProtectedRoute allowedRoles={['manager']} />}>
             <Route path="/m" element={<ManagerLayout />}>
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<ManagerDashboard />} />
@@ -66,7 +67,7 @@ export function App() {
               <Route path="insights" element={<InsightsPage />} />
             </Route>
           </Route>
-          <Route element={<RequireRole role="supervisor" />}>
+          <Route element={<ProtectedRoute allowedRoles={['supervisor']} />}>
             <Route path="/s" element={<SupervisorLayout />}>
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<SupervisorDashboardPage />} />
@@ -76,7 +77,7 @@ export function App() {
               <Route path="chat" element={<ChatPage />} />
             </Route>
           </Route>
-          <Route element={<RequireRole role="worker" />}>
+          <Route element={<ProtectedRoute allowedRoles={['worker']} />}>
             <Route path="/w" element={<WorkerLayout />}>
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<WorkerDashboardPage />} />

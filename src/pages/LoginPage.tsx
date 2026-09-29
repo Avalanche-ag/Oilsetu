@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import { useToast } from '../store/toast'
-import { ApiError, getAuthToken, getUsers, loginAsDemo, loginWithPassword, updateUserLanguage, resetDemo } from '../services/api'
+import { ApiError, getAuthToken, getUsers, loginAsDemo, loginWithPassword, registerUser, updateUserLanguage, resetDemo } from '../services/api'
 import { LanguageToggle } from '../components/shared/LanguageToggle'
 import { ConfirmModal } from '../components/ui/Modal'
 import oilsiteBg from '../assets/oilsite.jpg'
@@ -24,8 +24,12 @@ export function LoginPage() {
   const logout = useAuth((s) => s.logout)
   const pushToast = useToast((s) => s.push)
   const [users, setUsers] = useState<DemoUser[]>([])
+  const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [regName, setRegName] = useState('')
+  const [regConfirm, setRegConfirm] = useState('')
+  const [regRole, setRegRole] = useState<'supervisor' | 'worker'>('supervisor')
   const [showPassword, setShowPassword] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
 
@@ -67,6 +71,38 @@ export function LoginPage() {
       navigate(u.role === 'manager' ? '/m/dashboard' : u.role === 'supervisor' ? '/s/dashboard' : '/w/dashboard')
     } catch (err) {
       pushToast(err instanceof ApiError && err.status === 401 ? t('login.errBadCredentials') : t('login.errNoServer'), 'error')
+    }
+  }
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (regName.trim().length < 2) {
+      pushToast(t('login.errNameRequired'), 'error')
+      return
+    }
+    if (email.trim() === '' || !EMAIL_RE.test(email.trim())) {
+      pushToast(t('login.errBadEmail'), 'error')
+      return
+    }
+    if (password.length < 8) {
+      pushToast(t('login.errWeakPassword'), 'error')
+      return
+    }
+    if (password !== regConfirm) {
+      pushToast(t('login.errPasswordMismatch'), 'error')
+      return
+    }
+    try {
+      const { token, user: u } = await registerUser({ email: email.trim(), password, name: regName.trim(), role: regRole })
+      setSession(u, token)
+      i18n.changeLanguage(u.role === 'manager' ? 'en' : i18n.language)
+      updateUserLanguage(u.id, i18n.language as 'en' | 'hi')
+      pushToast(t('login.registerSuccess'), 'success')
+      navigate(u.role === 'manager' ? '/m/dashboard' : u.role === 'supervisor' ? '/s/dashboard' : '/w/dashboard')
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) pushToast(t('login.errEmailTaken'), 'error')
+      else if (err instanceof ApiError && err.status === 422) pushToast(err.message || t('login.errWeakPassword'), 'error')
+      else pushToast(t('login.errNoServer'), 'error')
     }
   }
 
@@ -124,11 +160,31 @@ export function LoginPage() {
 
         <div className="w-[calc(100%-30px)] rounded-[15px] bg-[rgba(255,255,255,0.96)] px-[20px] py-[22px] shadow-[0_15px_40px_rgba(0,0,0,0.25)] backdrop-blur-[8px] min-[700px]:w-[470px] min-[700px]:px-[28px] min-[700px]:py-[20px]">
           <div className="mb-[17px] text-center">
-            <h2 className="mb-[5px] text-[21px] text-[#102a43]">{t('login.cardTitle')}</h2>
-            <p className="text-[12px] text-[#64748b]">{t('login.cardSubtitle')}</p>
+            <h2 className="mb-[5px] text-[21px] text-[#102a43]">{mode === 'login' ? t('login.cardTitle') : t('login.registerTitle')}</h2>
+            <p className="text-[12px] text-[#64748b]">{mode === 'login' ? t('login.cardSubtitle') : t('login.registerSubtitle')}</p>
           </div>
 
-          <form onSubmit={handleEmailLogin}>
+          <form onSubmit={mode === 'login' ? handleEmailLogin : handleRegister}>
+            {mode === 'register' && (
+              <div className="mb-[13px]">
+                <label htmlFor="name" className="mb-[5px] block text-[13px] font-bold text-[#172b4d]">
+                  {t('login.nameLabel')}
+                </label>
+                <div className="relative">
+                  <span aria-hidden className="absolute left-[13px] top-1/2 z-[2] -translate-y-1/2 text-[15px] text-[#64748b]">
+                    👤
+                  </span>
+                  <input
+                    type="text"
+                    id="name"
+                    value={regName}
+                    onChange={(e) => setRegName(e.target.value)}
+                    placeholder={t('login.namePlaceholder')}
+                    className="h-[43px] w-full rounded-[7px] border border-[#d5dde6] bg-white px-[40px] text-[13px] text-[#172b4d] outline-none transition placeholder:text-[#9aa5b1] focus:border-[#1769d1] focus:shadow-[0_0_0_3px_rgba(23,105,209,0.10)]"
+                  />
+                </div>
+              </div>
+            )}
             <div className="mb-[13px]">
               <label htmlFor="email" className="mb-[5px] block text-[13px] font-bold text-[#172b4d]">
                 {t('login.emailLabel')}
@@ -183,22 +239,90 @@ export function LoginPage() {
                   {showPassword ? '◎' : '◉'}
                 </button>
               </div>
-              <a
-                href="#"
-                onClick={(e) => e.preventDefault()}
-                className="mt-[5px] block text-right text-[11px] text-[#1769d1] no-underline"
-              >
-                {t('login.forgotPassword')}
-              </a>
+              {mode === 'login' && (
+                <a
+                  href="#"
+                  onClick={(e) => e.preventDefault()}
+                  className="mt-[5px] block text-right text-[11px] text-[#1769d1] no-underline"
+                >
+                  {t('login.forgotPassword')}
+                </a>
+              )}
             </div>
+
+            {mode === 'register' && (
+              <>
+                <div className="mb-[13px]">
+                  <label htmlFor="confirmPassword" className="mb-[5px] block text-[13px] font-bold text-[#172b4d]">
+                    {t('login.confirmPasswordLabel')}
+                  </label>
+                  <div className="relative">
+                    <svg
+                      aria-hidden
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="absolute left-[13px] top-1/2 z-[2] h-[15px] w-[15px] -translate-y-1/2 text-[#64748b]"
+                    >
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      id="confirmPassword"
+                      value={regConfirm}
+                      onChange={(e) => setRegConfirm(e.target.value)}
+                      placeholder={t('login.confirmPasswordPlaceholder')}
+                      className="h-[43px] w-full rounded-[7px] border border-[#d5dde6] bg-white px-[40px] text-[13px] text-[#172b4d] outline-none transition placeholder:text-[#9aa5b1] focus:border-[#1769d1] focus:shadow-[0_0_0_3px_rgba(23,105,209,0.10)]"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-[13px]">
+                  <span className="mb-[5px] block text-[13px] font-bold text-[#172b4d]">{t('login.chooseRoleLabel')}</span>
+                  <div className="grid grid-cols-2 gap-[11px]">
+                    {(['supervisor', 'worker'] as const).map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setRegRole(r)}
+                        aria-pressed={regRole === r}
+                        className={`flex cursor-pointer items-center justify-center gap-2 rounded-[9px] border-2 p-[11px] text-white transition ${
+                          regRole === r
+                            ? 'border-[#0e58b8] bg-[#1769d1] shadow-[0_4px_12px_rgba(23,105,209,0.3)]'
+                            : 'border-transparent bg-[#94a3b8] hover:bg-[#7c8ca1]'
+                        }`}
+                      >
+                        <span aria-hidden className="text-[16px]">{r === 'supervisor' ? '👷' : '🦺'}</span>
+                        <span className="text-[13px] font-bold">{r === 'supervisor' ? t('login.supervisorRole') : t('worker.workerRole')}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
 
             <button
               type="submit"
               className="h-[43px] w-full cursor-pointer rounded-[7px] border-none bg-[#1769d1] text-[14px] font-bold text-white transition hover:-translate-y-px hover:bg-[#0e58b8]"
             >
-              {t('login.loginButton')} <span className="ml-[7px] text-[17px]">→</span>
+              {mode === 'login' ? t('login.loginButton') : t('login.registerButton')} <span className="ml-[7px] text-[17px]">→</span>
             </button>
           </form>
+
+          <p className="mt-[12px] text-center text-[12px] text-[#64748b]">
+            {mode === 'login' ? t('login.noAccount') : t('login.alreadyHaveAccount')}{' '}
+            <button
+              type="button"
+              onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+              className="cursor-pointer border-none bg-transparent p-0 text-[12px] font-bold text-[#1769d1] underline"
+            >
+              {mode === 'login' ? t('login.registerTab') : t('login.loginTab')}
+            </button>
+          </p>
 
           <div className="mb-[12px] mt-[16px] flex items-center gap-[10px]">
             <span className="h-px flex-1 bg-[#dce3ea]" />

@@ -168,6 +168,7 @@ def apply_activity_update(
 def ser_user(u: User) -> Dict[str, Any]:
     return {
         "id": u.id,
+        "email": u.email,
         "name": u.name,
         "role": u.role,
         "designation": u.designation,
