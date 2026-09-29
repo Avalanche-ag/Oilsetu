@@ -1,22 +1,32 @@
 import os
 import json
+
 from openai import OpenAI
-from proactive_intelligence import predict_risks
 from pydantic import BaseModel
 from typing import Optional, List
+
+from proactive_intelligence import predict_risks
 from prompt import PROMPT
 from matcher import ScheduleMatcher
 from normalizer import ActivityNormalizer, load_terminology
 
 
-# Configuration
-BASELINE_SCHEDULE = "data/01_baseline_schedule.xlsx"
-REPORT_PATH = "data/02_daily_progress_report_civil_piping.txt"
-TERMINOLOGY_CSV = "data/05_terminology_synonym_hints.csv"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+BASELINE_SCHEDULE = os.path.join(
+    PROJECT_ROOT,
+    "data",
+    "oilsetu_schedule.xlsx"
+)
+
+TERMINOLOGY_CSV = os.path.join(
+    PROJECT_ROOT,
+    "data",
+    "05_terminology_synonym_hints.csv"
+)
+
 MATCH_THRESHOLD = 0.40
 
-
-# --- 1. Define Pydantic Schema for LLM Extraction ---
 
 class Activity(BaseModel):
     activity_description: str
@@ -36,37 +46,54 @@ class ReportExtraction(BaseModel):
     activities: List[Activity]
 
 
-def run_pipeline():
+def run_pipeline(
+    report_text,
+    report_date="18-Jul-2026",
+    input_source="Daily Progress Report (DPR)"
+):
+    """
+    Run the complete AI/NLP pipeline on already-extracted text.
+
+    report_text can come from:
+    - TXT
+    - DOCX
+    - Voice transcription
+    - Any other text input
+
+    Args:
+        report_text: Text to process.
+        report_date: Date associated with the report/update.
+        input_source: Source of the input.
+
+    Returns:
+        dict: Final pipeline result.
+    """
 
     print("Loading Activity Normalizer...")
+
     terminology = load_terminology(TERMINOLOGY_CSV)
     normalizer = ActivityNormalizer(terminology)
 
     print("Loading Schedule Matcher...")
+
     matcher = ScheduleMatcher(BASELINE_SCHEDULE)
 
-    print(f"Reading Report: {REPORT_PATH}")
+    print("Preparing report text...")
 
-    with open(REPORT_PATH, "r", encoding="utf-8") as file:
-        report_text = file.read()
-
-    # Format prompt
     formatted_prompt = PROMPT.format(
-        report_date="18-Jul-2026",
+        report_date=report_date,
         report_text=report_text
     )
-
-    # --- 2. Gemini Client ---
 
     client = OpenAI(
         api_key=os.environ["GEMINI_API_KEY"],
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
     )
 
-    print("Calling Gemini for structured extraction...")
+    print("Sending text to AI...")
 
     response = client.chat.completions.create(
-        model="gemini-3.5-flash",
+        model=os.environ.get("GEMINI_MODEL", "gemini-3.6-flash"),
         messages=[
             {
                 "role": "user",
@@ -77,36 +104,30 @@ def run_pipeline():
 
     raw_output = response.choices[0].message.content
 
-    print("Gemini extraction received.")
+    print("Parsing AI response...")
 
     parsed_json = json.loads(raw_output)
-
-    # Gemini may return either:
-    # 1. {"activities": [...]}
-    # 2. [...]
-    # Normalize both formats to {"activities": [...]}
 
     if isinstance(parsed_json, list):
         parsed_json = {
             "activities": parsed_json
         }
 
-    # Fill in optional fields if Gemini omits them
     for activity in parsed_json.get("activities", []):
         activity.setdefault("percent_complete", None)
         activity.setdefault("evidence", "")
 
     extracted_data = ReportExtraction.model_validate(parsed_json)
+
     final_output = []
 
-    print("Normalizing and Matching extracted activities...\n")
-
-
-    # --- 3. Normalize + Match each activity ---
+    print("Running normalization and schedule matching...")
 
     for act in extracted_data.activities:
 
-        # --- A. Terminology Normalization ---
+        # -------------------------
+        # STEP 1: NORMALIZATION
+        # -------------------------
 
         norm_result = normalizer.normalize_activity(
             act.activity_description
@@ -115,31 +136,32 @@ def run_pipeline():
         search_description = act.activity_description
         normalized_term_used = None
 
-        if norm_result["confidence_tier"] in ["High", "Medium"]:
-
-            normalized_term_used = norm_result["normalized_plan_term"]
+        if norm_result["confidence_tier"] in [
+            "High",
+            "Medium"
+        ]:
+            normalized_term_used = (
+                norm_result["normalized_plan_term"]
+            )
 
             search_description = (
                 f"{act.activity_description} - "
                 f"{normalized_term_used}"
             )
 
-
-        # --- B. Match against baseline schedule ---
+        # -------------------------
+        # STEP 2: L5/L6 MATCHING
+        # -------------------------
 
         match_result = matcher.match_activity(
             search_description,
             act.discipline
         )
 
-
-        # --- C. Decide matched Activity ID ---
-
         if (
             match_result is None
             or match_result["score"] < MATCH_THRESHOLD
         ):
-
             matched_id = "UNMATCHED_NEW_ACTIVITY"
 
             match_score = (
@@ -148,69 +170,102 @@ def run_pipeline():
                 else match_result["score"]
             )
 
-        else:
+            near_match = (
+                None
+                if match_result is None
+                else {
+                    "activity_id": str(
+                        match_result.get(
+                            "matched_activity_id"
+                        )
+                    ),
+                    "name": match_result.get(
+                        "matched_activity_name"
+                    ),
+                    "score": match_result.get("score"),
+                }
+            )
 
+        else:
             matched_id = str(
                 match_result["matched_activity_id"]
             )
 
             match_score = match_result["score"]
 
+            near_match = None
 
-        # --- D. Combine everything ---
+        # -------------------------
+        # STEP 3: BUILD FINAL DATA
+        # -------------------------
 
         combined_activity = act.model_dump()
 
-        combined_activity["normalized_term_applied"] = (
-            normalized_term_used
-        )
+        # The actual input source comes from the caller.
+        combined_activity["source"] = input_source
 
-        combined_activity["matched_activity_id"] = matched_id
+        combined_activity[
+            "normalized_term_applied"
+        ] = normalized_term_used
 
-        combined_activity["matcher_score"] = match_score
+        combined_activity[
+            "matched_activity_id"
+        ] = matched_id
+
+        combined_activity[
+            "matcher_score"
+        ] = match_score
+
+        combined_activity["near_match"] = near_match
 
         final_output.append(combined_activity)
 
-    # --- 3.5 Proactive Execution Intelligence ---
+    # -------------------------
+    # STEP 4: RISK PREDICTION
+    # -------------------------
 
-    print("Running Proactive Execution Intelligence...\n")
-
-    predicted_risks = predict_risks(final_output)
-
-    # --- 4. Final Output ---
-
-    print("=" * 80)
-    print("FINAL END-TO-END PIPELINE OUTPUT:")
-    print("=" * 80)
+    predicted_risks = predict_risks(
+        final_output
+    )
 
     pipeline_result = {
         "activities": final_output,
         "predicted_risks": predicted_risks
     }
 
+    return pipeline_result
+
+# --------------------------------------------------
+# LOCAL DOCX TEST
+# --------------------------------------------------
+
+if __name__ == "__main__":
+
+    from docx_processor import extract_docx_text
+
+    docx_path = "sample.docx"
+
+    print(f"Reading DOCX: {docx_path}")
+
+    extracted_text = extract_docx_text(docx_path)
+
+    print("\nEXTRACTED DOCX TEXT")
+    print("=" * 80)
+    print(extracted_text)
+
+    result = run_pipeline(
+        report_text=extracted_text,
+        report_date="18-Jul-2026",
+        input_source="DOCX"
+    )
+
     output_json = json.dumps(
-        pipeline_result,
+        result,
         indent=2
     )
 
+    print("\n")
+    print("=" * 80)
+    print("FINAL PIPELINE RESULT")
+    print("=" * 80)
     print(output_json)
-
-
-    # --- 5. Save output ---
-
-    with open(
-        "data/pipeline_output.json",
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        f.write(output_json)
-
-    print(
-        "\nSaved output to "
-        "data/pipeline_output.json"
-    )
-
-
-if __name__ == "__main__":
-    run_pipeline()

@@ -22,6 +22,7 @@ import type {
   WorkerDashboardData,
   WorkerTaskAssignment,
   ReallocationResult,
+  CandidateActivity,
 } from '../types/domain'
 import { getDb } from '../mocks/db'
 import { analyzeReport } from '../mocks/aiEngine'
@@ -444,19 +445,195 @@ interface BackendExecutionResponse {
   top_matches: BackendTopMatch[]
 }
 
+export interface PipelineRiskInsight {
+  type: string
+  severity: string
+  message: string
+  reason?: string
+  action?: string
+  affected_activity_id?: string
+  affected_activity_name?: string
+}
+
+interface PipelineActivity {
+  activity_description: string
+  discipline: string
+  asset_id: string | null
+  actual_start: string | null
+  actual_end: string | null
+  status: string
+  percent_complete: number | null
+  delay_reason: string | null
+  source: string
+  evidence: string
+  confidence: number
+  normalized_term_applied: string | null
+  matched_activity_id: string
+  matcher_score: number | null
+  near_match: { activity_id: string; name: string | null; score: number | null } | null
+}
+
+interface PipelineResponse {
+  filename: string
+  source: string
+  extracted_text: string
+  transcribed_text?: string
+  ai_result: { activities: PipelineActivity[]; predicted_risks: PipelineRiskInsight[] }
+}
+
+export interface VisualProofResult {
+  activity_id: string
+  photo_verified: boolean
+  visual_match_confidence: number
+  status: string
+  reason: string
+}
+
+async function postForm<T>(path: string, form: FormData, base = API_BASE, timeoutMs = 240000): Promise<T> {
+  const headers: Record<string, string> = {}
+  const token = getAuthToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+  const res = await fetch(`${base}${path}`, {
+    method: 'POST',
+    headers,
+    body: form,
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const body = (await res.json()) as { detail?: unknown }
+      detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail ?? '')
+    } catch {
+      detail = ''
+    }
+    throw new ApiError(res.status, detail || `Request failed with status ${res.status}`)
+  }
+  return (await res.json()) as T
+}
+
+export async function uploadVisualProof(activityId: string, file: Blob): Promise<{ activity_id: string; photo_path: string }> {
+  const form = new FormData()
+  form.append('activity_id', activityId)
+  form.append('file', file, (file as File).name || 'photo.jpg')
+  return postForm('/visual-proof/upload', form, BACKEND_URL, 60000)
+}
+
+export async function verifyVisualProof(activityId: string): Promise<VisualProofResult> {
+  const form = new FormData()
+  form.append('activity_id', activityId)
+  return postForm('/visual-proof/verify', form, BACKEND_URL, 120000)
+}
+
+const PIPELINE_STATUS_MAP: Record<string, ActivityStatus | null> = {
+  Completed: 'COMPLETED',
+  'In Progress': 'IN_PROGRESS',
+  'Partially Completed': 'IN_PROGRESS',
+  'Not Started': 'NOT_STARTED',
+  Delayed: 'DELAYED',
+  Unknown: null,
+}
+
+function delayCodeFromText(text: string | null): DelayReasonCode {
+  if (!text) return 'OTHER'
+  const s = text.toLowerCase()
+  if (/material|deliver|supply|procure|vendor/.test(s)) return 'MATERIAL'
+  if (/manpower|labou?r|worker|staff|gang/.test(s)) return 'MANPOWER'
+  if (/equipment|machine|crane|tool|vehicle/.test(s)) return 'EQUIPMENT'
+  if (/weather|rain|heat|storm|flood/.test(s)) return 'WEATHER'
+  if (/design|drawing|revis|change order/.test(s)) return 'DESIGN_CHANGE'
+  if (/permit|approval|clearance|authorization/.test(s)) return 'PERMIT'
+  if (/frontend|front-end|previous activity|upstream/.test(s)) return 'FRONTEND'
+  return 'OTHER'
+}
+
+async function activityLookup(projectId: string): Promise<Map<string, ScheduleActivity>> {
+  let acts: ScheduleActivity[]
+  try {
+    acts = await getActivities(projectId)
+  } catch {
+    acts = getDb().activities.filter((a) => a.projectId === projectId)
+  }
+  return new Map(acts.map((a) => [a.id, a]))
+}
+
+function mapPipelineActivities(list: PipelineActivity[], lookup: Map<string, ScheduleActivity>): PreviewEntry[] {
+  return list.map((a) => {
+    const matched = a.matched_activity_id && a.matched_activity_id !== 'UNMATCHED_NEW_ACTIVITY' ? a.matched_activity_id : null
+    const confidence = Math.round((a.matcher_score ?? 0) * 100)
+    const act = matched ? lookup.get(matched) : undefined
+    const status = a.status in PIPELINE_STATUS_MAP ? PIPELINE_STATUS_MAP[a.status] : null
+    const candidates: CandidateActivity[] = []
+    if (matched && act) candidates.push({ activityId: act.id, name: act.name, discipline: act.discipline, confidence })
+    if (a.near_match?.activity_id && typeof a.near_match.score === 'number') {
+      candidates.push({
+        activityId: a.near_match.activity_id,
+        name: a.near_match.name ?? a.near_match.activity_id,
+        discipline: null,
+        confidence: Math.round(a.near_match.score * 100),
+      })
+    }
+    return {
+      tempId: uid('p'),
+      extractedText: a.activity_description,
+      matchedActivityId: matched,
+      matchedActivityName: act?.name,
+      status,
+      actualStart: a.actual_start ?? undefined,
+      actualEnd: a.actual_end ?? undefined,
+      delayReason: status === 'DELAYED' ? delayCodeFromText(a.delay_reason) : null,
+      delayText: a.delay_reason ?? undefined,
+      confidence,
+      band: bandFor(confidence),
+      keywords: [a.discipline, a.asset_id, a.normalized_term_applied].filter((k): k is string => Boolean(k)),
+      candidates,
+    }
+  })
+}
+
+async function postPipelineFile(kind: 'txt' | 'docx' | 'voice', blob: Blob, filename: string): Promise<PipelineResponse> {
+  const form = new FormData()
+  form.append('file', blob, filename)
+  return postForm(`/reports/upload-${kind}`, form)
+}
+
+export interface PipelineRun {
+  entries: PreviewEntry[]
+  risks: PipelineRiskInsight[]
+  extractedText: string
+}
+
 export const aiService = {
-  async processReport(
-    rawText: string,
+  async runPipeline(
+    input: { kind: 'text' | 'docx' | 'voice'; text?: string; blob?: Blob; filename?: string },
     ctx: { projectId: string; supervisorId: string; source: ReportSource; language: string }
-  ): Promise<PreviewEntry[]> {
+  ): Promise<PipelineRun> {
+    const fallbackText = input.text ?? ''
     if (BACKEND_ANALYZE && (await isBackendUp())) {
-      const live = await analyzeWithBackend(rawText)
-      if (live) return live
+      try {
+        const blob = input.blob ?? (input.kind === 'text' ? new Blob([fallbackText], { type: 'text/plain' }) : null)
+        if (blob) {
+          const filename = input.filename ?? (input.kind === 'text' ? 'report.txt' : input.kind === 'voice' ? 'recording.webm' : 'report.docx')
+          const res = await postPipelineFile(input.kind === 'text' ? 'txt' : input.kind, blob, filename)
+          const entries = mapPipelineActivities(res.ai_result.activities ?? [], await activityLookup(ctx.projectId))
+          if (entries.length > 0) {
+            return { entries, risks: res.ai_result.predicted_risks ?? [], extractedText: res.extracted_text }
+          }
+        }
+      } catch {
+        // fall through to legacy analyze / mock
+      }
+      try {
+        const legacy = await analyzeWithBackend(fallbackText)
+        if (legacy && legacy.length > 0) return { entries: legacy, risks: [], extractedText: fallbackText }
+      } catch {
+        // fall through to mock
+      }
     }
     const db = getDb()
     const allActivities = db.activities.filter((a) => a.projectId === ctx.projectId)
     const assignedActivities = allActivities.filter((a) => a.assigneeId === ctx.supervisorId && a.level === 'L6')
-    const previews = analyzeReport(rawText, {
+    const entries = analyzeReport(fallbackText, {
       projectId: ctx.projectId,
       supervisorId: ctx.supervisorId,
       source: ctx.source,
@@ -466,11 +643,19 @@ export const aiService = {
     })
     if (BACKEND_ANALYZE && (await isBackendUp())) {
       try {
-        return await refreshWithBackend(previews)
+        return { entries: await refreshWithBackend(entries), risks: [], extractedText: fallbackText }
       } catch {
-        return previews
+        return { entries, risks: [], extractedText: fallbackText }
       }
     }
-    return previews
+    return { entries, risks: [], extractedText: fallbackText }
+  },
+
+  async processReport(
+    rawText: string,
+    ctx: { projectId: string; supervisorId: string; source: ReportSource; language: string }
+  ): Promise<PreviewEntry[]> {
+    const run = await aiService.runPipeline({ kind: 'text', text: rawText }, ctx)
+    return run.entries
   },
 }

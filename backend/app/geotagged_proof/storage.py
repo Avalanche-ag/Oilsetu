@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import shutil
 
 
@@ -30,7 +31,11 @@ def save_uploaded_photo(
         exist_ok=True
     )
 
-    file_path = activity_directory / uploaded_file.filename
+    safe_name = os.path.basename(
+        (uploaded_file.filename or "photo.jpg").replace("\\", "/")
+    )
+
+    file_path = activity_directory / safe_name
 
     with open(file_path, "wb") as buffer:
 

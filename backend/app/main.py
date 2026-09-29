@@ -29,6 +29,7 @@ from .routers import (
     insights,
     projects,
     reports,
+    reports_ai,
     threads,
     workers,
 )
@@ -47,6 +48,7 @@ app.add_middleware(
 )
 app.include_router(visual_proof_router)
 app.include_router(ai_analyze_router)
+app.include_router(reports_ai.router, prefix="/api/v1")
 app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(assignments.router)
