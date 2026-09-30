@@ -17,7 +17,7 @@ export function WorkerDashboardPage() {
   const push = useToast((s) => s.push)
   const qc = useQueryClient()
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [status, setStatus] = useState<WorkerAttendanceStatus>('PTO')
+  const [status, setStatus] = useState<WorkerAttendanceStatus>('LEAVE')
   const [reason, setReason] = useState('')
 
   const { data: workerProjectIds = [], isLoading: workerProjectsLoading } = useQuery({ queryKey: ['workerProjects', userId], queryFn: getWorkerProjects, enabled: Boolean(userId) })
@@ -66,7 +66,6 @@ export function WorkerDashboardPage() {
             <label className="text-xs text-slate-600">
               {t('worker.leaveType')}
               <select value={status} onChange={(e) => setStatus(e.target.value as WorkerAttendanceStatus)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-2 text-sm">
-                <option value="PTO">{t('worker.pto')}</option>
                 <option value="LEAVE">{t('worker.leave')}</option>
               </select>
             </label>

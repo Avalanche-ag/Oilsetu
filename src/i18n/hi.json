@@ -166,7 +166,7 @@
     "orDivider": "या",
     "continueAs": "या इसके रूप में जारी रखें",
     "supervisorRole": "साइट सुपरवाइजर",
-    "plannerRole": "परियोजना योजनाकार",
+    "plannerRole": "प्रबंधक",
     "togglePasswordAria": "पासवर्ड दृश्यता टॉगल करें",
     "continueAsAria": "{{name}} के रूप में {{role}} जारी रखें",
     "featureAi": "AI-संचालित",
@@ -193,7 +193,8 @@
     "errPasswordMismatch": "पासवर्ड मेल नहीं खाते।",
     "errEmailTaken": "इस ईमेल से पहले से खाता मौजूद है।",
     "errNameRequired": "कृपया अपना नाम दर्ज करें।",
-    "registerSuccess": "खाता बन गया - OilSetu में आपका स्वागत है!"
+    "registerSuccess": "खाता बन गया - OilSetu में आपका स्वागत है!",
+    "chooseDisciplineLabel": "अपना ट्रेड चुनें"
   },
   "worker": {
     "portal": "वर्कर पोर्टल",
@@ -205,10 +206,9 @@
     "presentDays": "उपस्थित दिन",
     "absentDays": "अनुपस्थित दिन",
     "leaveDays": "अवकाश दिन",
-    "markLeaveTitle": "PTO या अवकाश दर्ज करें",
+    "markLeaveTitle": "अवकाश दर्ज करें",
     "date": "तारीख",
     "leaveType": "प्रकार",
-    "pto": "PTO",
     "leave": "अवकाश",
     "reason": "कारण",
     "reasonPlaceholder": "वैकल्पिक कारण",

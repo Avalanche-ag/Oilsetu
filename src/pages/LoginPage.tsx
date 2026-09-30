@@ -30,6 +30,7 @@ export function LoginPage() {
   const [regName, setRegName] = useState('')
   const [regConfirm, setRegConfirm] = useState('')
   const [regRole, setRegRole] = useState<'supervisor' | 'worker'>('supervisor')
+  const [regDiscipline, setRegDiscipline] = useState<'CIVIL' | 'PIPING' | 'ELECTRICAL'>('CIVIL')
   const [showPassword, setShowPassword] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
 
@@ -93,7 +94,7 @@ export function LoginPage() {
       return
     }
     try {
-      const { token, user: u } = await registerUser({ email: email.trim(), password, name: regName.trim(), role: regRole })
+      const { token, user: u } = await registerUser({ email: email.trim(), password, name: regName.trim(), role: regRole, ...(regRole === 'worker' ? { discipline: regDiscipline } : {}) })
       setSession(u, token)
       i18n.changeLanguage(u.role === 'manager' ? 'en' : i18n.language)
       updateUserLanguage(u.id, i18n.language as 'en' | 'hi')
@@ -120,7 +121,7 @@ export function LoginPage() {
   const brandTagline = t('login.brandTagline', { returnObjects: true })
   const brandLines = Array.isArray(brandTagline) ? brandTagline : [String(brandTagline)]
   const supervisors = users.filter((u) => u.role === 'supervisor')
-  const planners = users.filter((u) => u.role === 'manager')
+  const managers = users.filter((u) => u.role === 'manager')
   const workers = users.filter((u) => u.role === 'worker')
 
   return (
@@ -302,6 +303,29 @@ export function LoginPage() {
                     ))}
                   </div>
                 </div>
+
+                {regRole === 'worker' && (
+                  <div className="mb-[13px]">
+                    <span className="mb-[5px] block text-[13px] font-bold text-[#172b4d]">{t('login.chooseDisciplineLabel')}</span>
+                    <div className="grid grid-cols-3 gap-[11px]">
+                      {(['CIVIL', 'PIPING', 'ELECTRICAL'] as const).map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => setRegDiscipline(d)}
+                          aria-pressed={regDiscipline === d}
+                          className={`cursor-pointer rounded-[9px] border-2 p-[11px] text-[13px] font-bold text-white transition ${
+                            regDiscipline === d
+                              ? 'border-[#0e58b8] bg-[#1769d1] shadow-[0_4px_12px_rgba(23,105,209,0.3)]'
+                              : 'border-transparent bg-[#94a3b8] hover:bg-[#7c8ca1]'
+                          }`}
+                        >
+                          {t(`discipline.${d}`)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -349,7 +373,7 @@ export function LoginPage() {
                   </span>
                 </button>
               ))}
-              {planners.map((u) => (
+              {managers.map((u) => (
                 <button
                   key={u.id}
                   onClick={() => loginAs(u)}

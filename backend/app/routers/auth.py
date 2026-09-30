@@ -8,13 +8,14 @@ from sqlalchemy.orm import Session
 
 from ..auth import create_token, get_current_user, hash_password, verify_password
 from ..database import get_db
-from ..models import User
+from ..models import Project, User, Worker
 from .common import ser_user
 
 router = APIRouter(prefix="/api/v1", tags=["Auth & Users"])
 
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 REGISTERABLE_ROLES = ("supervisor", "worker")
+WORKER_DISCIPLINES = ("CIVIL", "PIPING", "ELECTRICAL")
 
 
 class LoginBody(BaseModel):
@@ -27,6 +28,7 @@ class RegisterBody(BaseModel):
     password: str
     name: str
     role: str
+    discipline: Optional[str] = None
 
 
 class DemoLoginBody(BaseModel):
@@ -74,17 +76,40 @@ def register(body: RegisterBody, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
+    discipline = (body.discipline or "").strip().upper()
+    if role == "worker" and discipline not in WORKER_DISCIPLINES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Pick a valid discipline (Civil, Piping, Electrical)",
+        )
+
     user = User(
         id=f"u-{uuid.uuid4().hex[:8]}",
         name=name,
         email=email,
         password_hash=hash_password(body.password),
         role=role,
-        designation="Site Supervisor" if role == "supervisor" else "Site Worker",
+        designation="Site Supervisor" if role == "supervisor" else f"{discipline.title()} Site Worker",
         preferred_language="en",
         avatar_initials=_avatar_initials(name),
     )
     db.add(user)
+    db.flush()
+    if role == "worker":
+        project = db.query(Project).order_by(Project.id).first()
+        if project is not None:
+            db.add(
+                Worker(
+                    id=f"w-{uuid.uuid4().hex[:8]}",
+                    user_id=user.id,
+                    project_id=project.id,
+                    name=name,
+                    discipline=discipline,
+                    workload=0,
+                    availability=100,
+                    status="ACTIVE",
+                )
+            )
     db.commit()
     db.refresh(user)
     return _token_response(user)

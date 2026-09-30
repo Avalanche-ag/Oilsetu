@@ -174,7 +174,7 @@ def update_attendance(body: AttendanceBody, db: Session = Depends(get_db), curre
     worker_id = body.workerId
     worker = _worker_for_user(db, body.projectId, current.id) if current.role == "worker" and not worker_id else _worker(db, body.projectId, worker_id or current.id)
     if current.role == "worker" and (worker.user_id != current.id or body.status not in ("PTO", "LEAVE")):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workers may only mark their own PTO or leave")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workers may only mark their own leave")
     if current.role not in ("worker", "supervisor", "manager"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Attendance access denied")
     row = (

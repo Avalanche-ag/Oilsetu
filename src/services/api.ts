@@ -92,7 +92,7 @@ export async function loginWithPassword(email: string, password: string): Promis
   return data
 }
 
-export async function registerUser(payload: { email: string; password: string; name: string; role: 'supervisor' | 'worker' }): Promise<{ token: string; user: User }> {
+export async function registerUser(payload: { email: string; password: string; name: string; role: 'supervisor' | 'worker'; discipline?: 'CIVIL' | 'PIPING' | 'ELECTRICAL' }): Promise<{ token: string; user: User }> {
   const data = await apiFetch<{ token: string; user: User }>('/auth/register', {
     method: 'POST',
     body: JSON.stringify(payload),

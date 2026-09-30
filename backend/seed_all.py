@@ -172,7 +172,7 @@ def seed_all(db: Session) -> None:
         ("w-pip-02", (today - timedelta(days=2)).isoformat(), "PRESENT", None),
         ("w-pip-02", (today - timedelta(days=1)).isoformat(), "ABSENT", "Medical leave"),
         ("w-pip-02", today.isoformat(), "PRESENT", None),
-        ("w-civ-01", (today - timedelta(days=1)).isoformat(), "PTO", "Approved PTO"),
+        ("w-civ-01", (today - timedelta(days=1)).isoformat(), "LEAVE", "Approved leave"),
     ]
     for worker_id, attendance_date, attendance_status, reason in attendance_seed:
         db.add(

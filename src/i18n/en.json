@@ -166,7 +166,7 @@
     "orDivider": "OR",
     "continueAs": "Or continue as",
     "supervisorRole": "Site Supervisor",
-    "plannerRole": "Project Planner",
+    "plannerRole": "Manager",
     "togglePasswordAria": "Toggle password visibility",
     "continueAsAria": "Continue as {{role}} {{name}}",
     "featureAi": "AI-Powered",
@@ -193,7 +193,8 @@
     "errPasswordMismatch": "Passwords do not match.",
     "errEmailTaken": "An account with this email already exists.",
     "errNameRequired": "Please enter your name.",
-    "registerSuccess": "Account created - welcome to OilSetu!"
+    "registerSuccess": "Account created - welcome to OilSetu!",
+    "chooseDisciplineLabel": "Choose your trade"
   },
   "worker": {
     "portal": "Worker portal",
@@ -205,10 +206,9 @@
     "presentDays": "Present days",
     "absentDays": "Absent days",
     "leaveDays": "Leave days",
-    "markLeaveTitle": "Mark PTO or leave",
+    "markLeaveTitle": "Mark leave",
     "date": "Date",
     "leaveType": "Type",
-    "pto": "PTO",
     "leave": "Leave",
     "reason": "Reason",
     "reasonPlaceholder": "Optional reason",
