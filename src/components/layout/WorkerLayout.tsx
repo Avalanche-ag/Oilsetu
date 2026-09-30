@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../store/auth'
@@ -9,6 +10,7 @@ export function WorkerLayout() {
   const navigate = useNavigate()
   const user = useAuth((s) => s.user)
   const logout = useAuth((s) => s.logout)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   const handleLogout = () => {
     logout()
@@ -17,7 +19,7 @@ export function WorkerLayout() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <header className="flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4">
+      <header className="relative flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded bg-brand-600 text-white">
             <Icon name="work" size={18} />
@@ -29,18 +31,19 @@ export function WorkerLayout() {
         </div>
         <div className="flex items-center gap-2">
           <LanguageToggle />
-          <div className="group relative">
-            <button className="rounded-full p-1 hover:bg-slate-100" aria-label={t('common.account')}>
-              <Avatar initials={user?.avatarInitials ?? 'W'} size="sm" />
-            </button>
-            <div className="absolute right-0 top-full z-20 mt-1 hidden w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg group-hover:block">
-              <button onClick={handleLogout} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">
+          <button onClick={() => setMenuOpen(!menuOpen)} aria-label={t('common.account')} className="cursor-pointer rounded p-1 text-slate-500 hover:bg-slate-100">
+            <Avatar initials={user?.avatarInitials ?? 'W'} size="sm" />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-4 top-12 z-50 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+              <button onClick={handleLogout} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">
                 <Icon name="logout" size={14} />
                 {t('common.signOut')}
               </button>
             </div>
-          </div>
+          )}
         </div>
+        {menuOpen && <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />}
       </header>
       <main className="mx-auto max-w-3xl p-4 lg:p-6">
         <Outlet />

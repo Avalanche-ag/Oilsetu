@@ -521,7 +521,9 @@
       "fileHint": "Accepted: .docx, .txt",
       "fileChoose": "Choose a file",
       "risksTitle": "Predicted risks",
-      "noMatchSuggestion": "Did you mean: {{name}}?"
+      "noMatchSuggestion": "Did you mean: {{name}}?",
+      "recordingTooShort": "Recording was too short. Hold the mic and speak for a few seconds.",
+      "noSpeechDetected": "No speech was detected in that recording. Please try again."
     },
     "history": {
       "title": "Report History",

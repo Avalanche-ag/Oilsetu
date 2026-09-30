@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../store/auth'
 import { useUi } from '../../store/ui'
-import { aiService, submitReport, getSupervisorReports, getWorkers, getActivities, uploadVisualProof, verifyVisualProof } from '../../services/api'
+import { ApiError, aiService, submitReport, getSupervisorReports, getWorkers, getActivities, uploadVisualProof, verifyVisualProof } from '../../services/api'
 import type { PipelineRiskInsight, VisualProofResult } from '../../services/api'
 import { todayIso } from '../../utils/dates'
 import { PageHeader, Card, CardBody, Button, SegmentedTabs, Textarea, Select, BandChip, ConfidenceMeter, Chip, SimulatedAiTag, TimeAgo, Icon } from '../../components/ui'
@@ -133,6 +133,11 @@ export function ReportPage() {
       setTranscribing(false)
       return
     }
+    if (blob.size < 2000) {
+      setTranscribing(false)
+      push(t('sup.report.recordingTooShort'), 'error')
+      return
+    }
     try {
       const type = blob.type
       const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : type.includes('mpeg') ? 'mp3' : 'webm'
@@ -144,8 +149,9 @@ export function ReportPage() {
       setEntries(run.entries)
       setRisks(run.risks)
       setReportSource('VOICE')
-    } catch {
-      push(t('sup.report.pipelineFailed'), 'error')
+      if (run.extractedText.trim() === '') push(t('sup.report.noSpeechDetected'), 'error')
+    } catch (err) {
+      push(err instanceof ApiError && err.message ? err.message : t('sup.report.pipelineFailed'), 'error')
     } finally {
       setTranscribing(false)
     }

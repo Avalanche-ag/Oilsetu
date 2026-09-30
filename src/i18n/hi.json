@@ -521,7 +521,9 @@
       "fileHint": "स्वीकार्य: .docx, .txt",
       "fileChoose": "फ़ाइल चुनें",
       "risksTitle": "पूर्वानुमानित जोखिम",
-      "noMatchSuggestion": "क्या आपका अर्थ यह था: {{name}}?"
+      "noMatchSuggestion": "क्या आपका अर्थ यह था: {{name}}?",
+      "recordingTooShort": "रिकॉर्डिंग बहुत छोटी थी। माइक पकड़ें और कुछ सेकंड तक बोलें।",
+      "noSpeechDetected": "रिकॉर्डिंग में कोई आवाज़ नहीं मिली। कृपया दोबारा कोशिश करें।"
     },
     "history": {
       "title": "रिपोर्ट इतिहास",

@@ -626,12 +626,12 @@ export const aiService = {
           const filename = input.filename ?? (input.kind === 'text' ? 'report.txt' : input.kind === 'voice' ? 'recording.webm' : 'report.docx')
           const res = await postPipelineFile(input.kind === 'text' ? 'txt' : input.kind, blob, filename)
           const entries = mapPipelineActivities(res.ai_result.activities ?? [], await activityLookup(ctx.projectId))
-          if (entries.length > 0) {
+          if (entries.length > 0 || (res.extracted_text ?? '').trim().length > 0) {
             return { entries, risks: res.ai_result.predicted_risks ?? [], extractedText: res.extracted_text }
           }
         }
-      } catch {
-        // fall through to legacy analyze / mock
+      } catch (err) {
+        if (input.kind !== 'text' && err instanceof ApiError) throw err
       }
       try {
         const legacy = await analyzeWithBackend(fallbackText)
